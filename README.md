@@ -74,8 +74,22 @@ pomo --lang en          # force the UI language
 pomo --stopwatch        # start in stopwatch mode
 ```
 
-Keys: `space` pause/resume · `n` next phase · `r` reset · `p` switch profile ·
-`m` pomodoro/stopwatch mode · `l` lap (stopwatch) · `q` quit.
+### Keys
+
+| Group | Key       | Pomodoro                  | Stopwatch                |
+|-------|-----------|---------------------------|--------------------------|
+| Timer | `space`   | start / pause / resume    | start / pause / resume   |
+| Timer | `n` / `l` | `n`: next phase           | `l`: record a lap        |
+| Timer | `r`       | reset the current phase   | reset the time and laps  |
+| App   | `p`       | switch profile            | —                        |
+| App   | `m`       | switch to the stopwatch   | switch to the pomodoro   |
+| App   | `q`       | quit                      | quit                     |
+
+The key hints at the bottom of the screen follow the same layout: timer keys on the first line,
+app keys on the second. They only list the keys available in the current mode and say what each
+key does right now (`space` shows Start, Pause or Resume; `m` shows the mode it switches to).
+Labels are clickable, and on narrow terminals the hints wrap without splitting a key from its label.
+
 Waybar: click = pause/resume, right click = next phase (or lap in stopwatch mode).
 
 The waybar module shows the remaining time (here: work running, work paused, short break,

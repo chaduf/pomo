@@ -21,12 +21,13 @@ import time
 import tomllib
 from pathlib import Path
 
+from rich.cells import cell_len
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Center, Middle, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Digits, Footer, Label, OptionList, ProgressBar
+from textual.widgets import DataTable, Digits, Label, OptionList, ProgressBar, Static
 from textual.widgets.option_list import Option
 
 STATE_FILE = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "pomo.json"
@@ -45,11 +46,13 @@ TRANSLATIONS = {
         "Short break": "Pause courte",
         "Long break": "Pause longue",
         " (paused)": " (en pause)",
-        "Pause/Resume": "Pause/Reprise",
         "Next phase": "Phase suivante",
         "Reset": "Réinitialiser",
+        "Start": "Démarrer",
+        "Pause": "Pause",
+        "Resume": "Reprendre",
+        "Pomodoro": "Pomodoro",
         "Lap": "Tour",
-        "Mode": "Mode",
         "Stopwatch": "Chronomètre",
         "Lap time": "Temps du tour",
         "Total": "Total",
@@ -194,6 +197,10 @@ class Pomo(App):
     .stopwatch #phase { color: $accent; }
     .paused Digits { color: $text-disabled; }
     #laps { width: auto; height: auto; max-height: 12; margin-top: 1; }
+    #hints { dock: bottom; width: 100%; height: auto; padding: 0 1;
+             background: $panel; color: $text-muted; text-align: center;
+             link-style: none; link-color: $text-muted; link-background: transparent;
+             link-style-hover: none; link-color-hover: $text; link-background-hover: $boost; }
     """
 
     def __init__(self, settings: dict, profile: str | None, no_hooks: bool, mode: str = POMODORO) -> None:
@@ -237,19 +244,14 @@ class Pomo(App):
                 yield Label(id="info")
             with Center():
                 yield DataTable(id="laps", show_cursor=False, zebra_stripes=True)
-        yield Footer()
+        yield Static(id="hints")
 
     def on_mount(self) -> None:
         self.title = "pomo"
         self.main_screen = self.screen  # the profile menu is pushed on top of it
-        # bound at runtime so descriptions use the resolved language
-        self.bind("space", "toggle", description=_("Pause/Resume"))
-        self.bind("n", "skip", description=_("Next phase"))
-        self.bind("l", "lap", description=_("Lap"))
-        self.bind("r", "reset", description=_("Reset"))
-        self.bind("p", "profiles", description=_("Profiles"))
-        self.bind("m", "mode", description=_("Mode"))
-        self.bind("q", "quit", description=_("Quit"))
+        for key, action in (("space", "toggle"), ("n", "skip"), ("l", "lap"), ("r", "reset"),
+                            ("p", "profiles"), ("m", "mode"), ("q", "quit")):
+            self.bind(key, action, show=False)  # labels are rendered by render_hints()
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGUSR1, self.action_toggle)
         loop.add_signal_handler(signal.SIGUSR2, self.action_skip)
@@ -397,8 +399,48 @@ class Pomo(App):
         })
 
     # ---- display -------------------------------------------------------
+    def hint_rows(self) -> list[list[tuple[str, str, str]]]:
+        """Key hints as (key, action, label), grouped by role: the timer first, then the app.
+        Labels say what the key will do now (Start / Pause / Resume, the mode to switch to)."""
+        stopwatch = self.mode == STOPWATCH
+        idle = not self.running and (self.elapsed == 0 if stopwatch else not self.started)
+        toggle = _("Start") if idle else _("Pause") if self.running else _("Resume")
+        timer = [("space", "toggle", toggle),
+                 ("l", "lap", _("Lap")) if stopwatch else ("n", "skip", _("Next phase")),
+                 ("r", "reset", _("Reset"))]
+        app = [("p", "profiles", _("Profiles")),
+               ("m", "mode", _("Pomodoro") if stopwatch else _("Stopwatch")),
+               ("q", "quit", _("Quit"))]
+        return [[h for h in row if self.check_action(h[1], ())] for row in (timer, app)]
+
+    def render_hints(self) -> None:
+        """Render the hint rows, wrapping whole "key label" items to the terminal width."""
+        width = max(self.size.width - 2, 20)  # minus the horizontal padding
+        sep = "   "
+        lines = []
+        for row in self.hint_rows():
+            line, used = [], 0
+            for key, action, label in row:
+                size = cell_len(f"{key} {label}")
+                if line and used + len(sep) + size > width:
+                    lines.append(line)
+                    line, used = [], 0
+                used += (len(sep) if line else 0) + size
+                # the label is the clickable part: link styling would override the key color
+                line.append(f"[b $accent]{key}[/] [@click=app.{action}]{label}[/]")
+            lines.append(line)
+        markup = "\n".join(sep.join(line) for line in lines)
+        if markup != getattr(self, "_hints", None):
+            self._hints = markup
+            self.main_screen.query_one("#hints", Static).update(markup)
+
+    def on_resize(self) -> None:
+        if hasattr(self, "main_screen"):
+            self.render_hints()
+
     def render_state(self) -> None:
         screen = self.main_screen
+        self.render_hints()
         pomodoro = self.mode == POMODORO
         screen.query_one("#bar", ProgressBar).display = pomodoro
         screen.query_one("#laps", DataTable).display = not pomodoro and bool(self.laps)
