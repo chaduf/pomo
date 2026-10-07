@@ -1,12 +1,13 @@
 #!/usr/bin/python3
 """pomo — Pomodoro TUI that runs commands when work periods start and end
 (default: play/pause mpv through playerctl), sends desktop notifications and
-exposes its state to waybar.
+exposes its state to waybar. Also has a stopwatch mode with laps.
 
 Config:  ~/.config/pomo/config.toml  (pomo -L to list profiles, pomo -p NAME)
 Hooks:   on_work_start / on_work_end (config) or --on-work-start / --on-work-end (CLI)
-Keys:    space = pause/resume, n = next phase, r = reset phase, p = switch profile, q = quit
-Signals: SIGUSR1 = pause/resume, SIGUSR2 = next phase (used by waybar)
+Keys:    space = pause/resume, n = next phase, r = reset, p = switch profile,
+         m = pomodoro/stopwatch mode, l = lap (stopwatch), q = quit
+Signals: SIGUSR1 = pause/resume, SIGUSR2 = next phase or lap (used by waybar)
 UI language: --lang, $POMO_LANG, `language` in config, then the system locale.
 """
 import argparse
@@ -19,19 +20,21 @@ import time
 import tomllib
 from pathlib import Path
 
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Center, Middle, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Digits, Footer, Label, OptionList, ProgressBar
+from textual.widgets import DataTable, Digits, Footer, Label, OptionList, ProgressBar
 from textual.widgets.option_list import Option
 
 STATE_FILE = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "pomo.json"
 CONFIG_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "pomo" / "config.toml"
 WAYBAR_SIGNAL = 9  # must match "signal" in the waybar module
 
+POMODORO, STOPWATCH = "pomodoro", "stopwatch"
 WORK, SHORT, LONG = "work", "short", "long"
-ICONS = {WORK: "🍅", SHORT: "☕", LONG: "🌴"}
+ICONS = {WORK: "🍅", SHORT: "☕", LONG: "🌴", STOPWATCH: "⏱"}
 
 # ---------------------------------------------------------------- i18n
 # English strings are the keys; add a language by adding a dict here.
@@ -43,7 +46,16 @@ TRANSLATIONS = {
         " (paused)": " (en pause)",
         "Pause/Resume": "Pause/Reprise",
         "Next phase": "Phase suivante",
-        "Reset phase": "Reset phase",
+        "Reset": "Réinitialiser",
+        "Lap": "Tour",
+        "Mode": "Mode",
+        "Stopwatch": "Chronomètre",
+        "Lap time": "Temps du tour",
+        "Total": "Total",
+        "Laps: {n}": "Tours : {n}",
+        "Stopwatch mode": "Mode chronomètre",
+        "Pomodoro mode": "Mode pomodoro",
+        "start in stopwatch mode": "démarrer en mode chronomètre",
         "Quit": "Quitter",
         "Back to work!": "Au travail !",
         "Session {n}/{total} — {minutes} min": "Session {n}/{total} — {minutes} min",
@@ -155,6 +167,15 @@ def refresh_waybar() -> None:
     sh("pkill", f"-RTMIN+{WAYBAR_SIGNAL}", "-x", "waybar")
 
 
+def format_elapsed(seconds: float) -> str:
+    """MM:SS.d below one hour, H:MM:SS.d above."""
+    tenths = int(seconds * 10)
+    h, rest = divmod(tenths, 36000)
+    m, rest = divmod(rest, 600)
+    sec, d = divmod(rest, 10)
+    return f"{h}:{m:02d}:{sec:02d}.{d}" if h else f"{m:02d}:{sec:02d}.{d}"
+
+
 def phase_label(phase: str) -> str:
     return _({WORK: "Work", SHORT: "Short break", LONG: "Long break"}[phase])
 
@@ -169,16 +190,21 @@ class Pomo(App):
     #info { color: $text-muted; margin-top: 1; width: auto; }
     .work #phase { color: $error; }
     .short #phase, .long #phase { color: $success; }
+    .stopwatch #phase { color: $accent; }
     .paused Digits { color: $text-disabled; }
+    #laps { width: auto; height: auto; max-height: 12; margin-top: 1; }
     """
 
-    def __init__(self, settings: dict, profile: str | None, no_hooks: bool) -> None:
+    def __init__(self, settings: dict, profile: str | None, no_hooks: bool, mode: str = POMODORO) -> None:
         super().__init__()
         self.no_hooks = no_hooks
+        self.mode = mode
         self.load_profile(settings, profile)
+        self.reset_stopwatch()
 
     def load_profile(self, settings: dict, profile: str | None) -> None:
         """Apply settings and reset the timer to its freshly launched state."""
+        self.settings = settings
         self.durations = {WORK: settings["work"] * 60, SHORT: settings["short_break"] * 60,
                           LONG: settings["long_break"] * 60}
         self.cycles = settings["cycles"]
@@ -191,6 +217,13 @@ class Pomo(App):
         self.started = False  # the first "space" is a start, not a resume
         self.last_tick = time.monotonic()
 
+    def reset_stopwatch(self) -> None:
+        self.elapsed = 0.0
+        self.laps: list[float] = []  # total elapsed time at each lap
+        if self.mode == STOPWATCH:
+            self.running = False
+        self.last_tick = time.monotonic()
+
     def compose(self) -> ComposeResult:
         with Middle():
             with Center():
@@ -201,6 +234,8 @@ class Pomo(App):
                 yield ProgressBar(show_eta=False, show_percentage=False, id="bar")
             with Center():
                 yield Label(id="info")
+            with Center():
+                yield DataTable(id="laps", show_cursor=False, zebra_stripes=True)
         yield Footer()
 
     def on_mount(self) -> None:
@@ -209,14 +244,28 @@ class Pomo(App):
         # bound at runtime so descriptions use the resolved language
         self.bind("space", "toggle", description=_("Pause/Resume"))
         self.bind("n", "skip", description=_("Next phase"))
-        self.bind("r", "reset", description=_("Reset phase"))
+        self.bind("l", "lap", description=_("Lap"))
+        self.bind("r", "reset", description=_("Reset"))
         self.bind("p", "profiles", description=_("Profiles"))
+        self.bind("m", "mode", description=_("Mode"))
         self.bind("q", "quit", description=_("Quit"))
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGUSR1, self.action_toggle)
         loop.add_signal_handler(signal.SIGUSR2, self.action_skip)
-        self.set_interval(0.25, self.tick)
+        laps = self.query_one("#laps", DataTable)
+        laps.add_column(_("Lap"), key="n")
+        laps.add_column(_("Lap time"), key="lap")
+        laps.add_column(_("Total"), key="total")
+        self.set_interval(0.1, self.tick)
         self.render_state()  # wait for "space" to start
+
+    def check_action(self, action: str, parameters: tuple) -> bool | None:
+        """Hide the bindings that do not apply to the current mode."""
+        if action in ("skip", "profiles"):
+            return self.mode == POMODORO
+        if action == "lap":
+            return self.mode == STOPWATCH
+        return True
 
     # ---- logic ---------------------------------------------------------
     def start_phase(self, phase: str, announce: bool = True) -> None:
@@ -253,7 +302,9 @@ class Pomo(App):
 
     def tick(self) -> None:
         now = time.monotonic()
-        if self.running:
+        if self.running and self.mode == STOPWATCH:
+            self.elapsed += now - self.last_tick
+        elif self.running:
             self.remaining -= now - self.last_tick
             if self.remaining <= 0:
                 self.next_phase()
@@ -265,7 +316,7 @@ class Pomo(App):
     def action_toggle(self) -> None:
         self.running = not self.running
         self.last_tick = time.monotonic()
-        if self.phase == WORK:
+        if self.mode == POMODORO and self.phase == WORK:
             if self.running:
                 self.hook("start", "resume" if self.started else "start")
             else:
@@ -274,11 +325,36 @@ class Pomo(App):
         self.render_state()
 
     def action_skip(self) -> None:
-        self.next_phase()
+        if self.mode == STOPWATCH:
+            self.action_lap()  # waybar right click
+        else:
+            self.next_phase()
+
+    def action_lap(self) -> None:
+        if self.mode == STOPWATCH and self.running:
+            self.laps.append(self.elapsed)
+            self.render_laps()
+            self.render_state()
 
     def action_reset(self) -> None:
-        self.remaining = float(self.durations[self.phase])
+        if self.mode == STOPWATCH:
+            self.reset_stopwatch()
+            self.render_laps()
+        else:
+            self.remaining = float(self.durations[self.phase])
         self.render_state()
+
+    def action_mode(self) -> None:
+        """Switch between pomodoro and stopwatch; the new mode starts fresh."""
+        if self.mode == POMODORO and self.phase == WORK and self.running:
+            self.hook("end", "switch")
+        self.mode = STOPWATCH if self.mode == POMODORO else POMODORO
+        self.load_profile(self.settings, self.profile)
+        self.reset_stopwatch()
+        self.render_laps()
+        self.refresh_bindings()
+        self.render_state()
+        self.notify(_("Stopwatch mode") if self.mode == STOPWATCH else _("Pomodoro mode"))
 
     def action_profiles(self) -> None:
         if isinstance(self.screen, ProfileMenu):
@@ -305,7 +381,7 @@ class Pomo(App):
         self.push_screen(ProfileMenu(entries, self.profile), switch)
 
     async def action_quit(self) -> None:
-        if self.phase == WORK and self.running:
+        if self.mode == POMODORO and self.phase == WORK and self.running:
             self.hook("end", "quit")
         STATE_FILE.unlink(missing_ok=True)
         refresh_waybar()
@@ -321,10 +397,42 @@ class Pomo(App):
 
     # ---- display -------------------------------------------------------
     def render_state(self) -> None:
+        screen = self.main_screen
+        pomodoro = self.mode == POMODORO
+        screen.query_one("#bar", ProgressBar).display = pomodoro
+        screen.query_one("#laps", DataTable).display = not pomodoro and bool(self.laps)
+        if pomodoro:
+            self.render_pomodoro(screen)
+        else:
+            self.render_stopwatch(screen)
+
+    def render_stopwatch(self, screen) -> None:
+        screen.set_classes([STOPWATCH] + ([] if self.running else ["paused"]))
+        state = "" if self.running else _(" (paused)")
+        screen.query_one("#phase", Label).update(f"{ICONS[STOPWATCH]}  {_('Stopwatch')}{state}")
+        screen.query_one("#clock", Digits).update(format_elapsed(self.elapsed))
+        screen.query_one("#info", Label).update(_("Laps: {n}", n=len(self.laps)))
+        secs = int(self.elapsed)
+        self.write_state({"mode": STOPWATCH, "running": self.running, "elapsed": secs,
+                          "laps": len(self.laps), "since": time.time()},
+                         key=(STOPWATCH, self.running, len(self.laps)), tick=secs)
+
+    def render_laps(self) -> None:
+        """Lap table, newest first; fastest lap in green, slowest in red."""
+        table = self.main_screen.query_one("#laps", DataTable)
+        table.clear()
+        splits = [t - (self.laps[i - 1] if i else 0.0) for i, t in enumerate(self.laps)]
+        best = splits.index(min(splits)) if len(splits) > 1 else None
+        worst = splits.index(max(splits)) if len(splits) > 1 else None
+        for i in reversed(range(len(splits))):
+            style = "green" if i == best else "red" if i == worst else ""
+            table.add_row(str(i + 1), Text(format_elapsed(splits[i]), style=style),
+                          format_elapsed(self.laps[i]))
+
+    def render_pomodoro(self, screen) -> None:
         secs = max(0, int(self.remaining + 0.999))
         mm, ss = divmod(secs, 60)
         total = self.durations[self.phase]
-        screen = self.main_screen
         screen.set_classes([self.phase] + ([] if self.running else ["paused"]))
         state = "" if self.running else _(" (paused)")
         screen.query_one("#phase", Label).update(f"{ICONS[self.phase]}  {phase_label(self.phase)}{state}")
@@ -335,23 +443,23 @@ class Pomo(App):
             + _("Pomodoros: {done}  ·  cycle {n}/{total}", done=self.done_pomodoros,
                 n=self.done_pomodoros % self.cycles + 1, total=self.cycles)
         )
-        self.write_state(secs, total)
+        self.write_state({"mode": POMODORO, "phase": self.phase, "running": self.running,
+                          "remaining": secs, "total": total, "done": self.done_pomodoros,
+                          # end timestamp: waybar can count down without waiting for the TUI
+                          "ends_at": time.time() + secs if self.running else None},
+                         key=(self.phase, self.running, self.done_pomodoros), tick=secs)
 
-    def write_state(self, secs: int, total: int) -> None:
-        data = {
-            "pid": os.getpid(), "phase": self.phase, "running": self.running,
-            "remaining": secs, "total": total, "done": self.done_pomodoros, "lang": lang,
-            # end timestamp: waybar can count down without waiting for the TUI
-            "ends_at": time.time() + secs if self.running else None,
-        }
+    def write_state(self, data: dict, key: tuple, tick: int) -> None:
+        """Write the waybar state file when the displayed second changes;
+        signal waybar right away only when `key` (mode, phase, running...) changes."""
         old = getattr(self, "_last_state", None)
-        if old != (self.phase, self.running, self.done_pomodoros, secs):
+        if old != (key, tick):
             tmp = STATE_FILE.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data))
+            tmp.write_text(json.dumps({"pid": os.getpid(), "lang": lang, **data}))
             tmp.replace(STATE_FILE)
-            if old is None or old[:3] != (self.phase, self.running, self.done_pomodoros):
+            if old is None or old[0] != key:
                 refresh_waybar()
-            self._last_state = (self.phase, self.running, self.done_pomodoros, secs)
+            self._last_state = (key, tick)
 
 
 class ProfileList(OptionList):
@@ -481,6 +589,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--on-work-end", metavar="CMD",
                     help=_("command run when work ends (\"{default}\")", default=DEFAULTS["on_work_end"]))
     ap.add_argument("--no-hooks", action="store_true", help=_("do not run any hook"))
+    ap.add_argument("--stopwatch", action="store_true", help=_("start in stopwatch mode"))
     ap.add_argument("--lang", choices=("auto", *LANGUAGES),
                     help=_("UI language: {langs} (default: auto)", langs=", ".join(LANGUAGES)))
     return ap
@@ -530,7 +639,7 @@ def run(args: argparse.Namespace, cfg: dict) -> None:
             settings[key] = getattr(args, key)
 
     try:
-        Pomo(settings, name, args.no_hooks).run()
+        Pomo(settings, name, args.no_hooks, STOPWATCH if args.stopwatch else POMODORO).run()
     finally:
         STATE_FILE.unlink(missing_ok=True)
         refresh_waybar()

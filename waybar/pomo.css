@@ -6,4 +6,5 @@
 #custom-pomo.work   { color: @red; }
 #custom-pomo.short,
 #custom-pomo.long   { color: @green; }
+#custom-pomo.stopwatch { color: @blue; }
 #custom-pomo.paused { color: @lavender; opacity: 0.6; }

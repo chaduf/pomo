@@ -16,8 +16,8 @@
 # (in [hooks] for every profile, or inside a profile to override):
 #   on_work_start  work starts, and timer resumes during work
 #                  (default: "playerctl -a -p mpv play")
-#   on_work_end    work ends, timer paused during work, or pomo quit / profile
-#                  switched during work
+#   on_work_end    work ends, timer paused during work, or pomo quit / profile or
+#                  mode switched during work
 #                  (default: "playerctl -a -p mpv pause")
 #   "" = do nothing.
 #

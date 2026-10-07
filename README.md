@@ -2,6 +2,7 @@
 
 Pomodoro TUI (Textual) that runs commands when work periods start and end
 (default: play/pause mpv through MPRIS), sends desktop notifications and shows up in waybar.
+It also has a stopwatch mode with laps.
 
 ![Main view](docs/screenshots/main-view.png)
 
@@ -67,10 +68,12 @@ pomo -L                 # list profiles
 pomo --on-work-start "CMD" --on-work-end "CMD"   # one-off hooks
 pomo --no-hooks         # run no hook at all
 pomo --lang en          # force the UI language
+pomo --stopwatch        # start in stopwatch mode
 ```
 
-Keys: `space` pause/resume · `n` next phase · `r` reset · `p` switch profile · `q` quit.
-Waybar: click = pause/resume, right click = next phase.
+Keys: `space` pause/resume · `n` next phase · `r` reset · `p` switch profile ·
+`m` pomodoro/stopwatch mode · `l` lap (stopwatch) · `q` quit.
+Waybar: click = pause/resume, right click = next phase (or lap in stopwatch mode).
 
 The waybar module shows the remaining time (here: work running, work paused, short break):
 
@@ -83,6 +86,18 @@ pomodoro count start over, and CLI duration/hook overrides no longer apply (`--n
 `--lang` are kept).
 
 ![Profile menu](docs/screenshots/profile-menu.png)
+
+### Stopwatch mode
+
+Press `m` (or launch with `--stopwatch`) to switch to a classic stopwatch; press `m` again to go
+back to the pomodoro, which restarts fresh with the current profile.
+
+- `space` starts / pauses, `l` records a lap, `r` resets the time and laps.
+- The lap table lists the newest lap first with its lap time and total time; the fastest lap is
+  shown in green, the slowest in red.
+- The waybar module shows `⏱ MM:SS`; right click records a lap.
+- No hooks or notifications run in stopwatch mode. Switching modes during a work period runs
+  `on_work_end` with `POMO_EVENT=switch`.
 
 ## Configuration
 
@@ -127,7 +142,7 @@ Precedence: defaults < `[hooks]` < profile < CLI options. An empty string `""` d
 | Hook            | Runs when                                                                    |
 |-----------------|------------------------------------------------------------------------------|
 | `on_work_start` | a work period starts; the timer resumes during work                          |
-| `on_work_end`   | work ends (naturally or with `n`); timer paused during work; `q` or profile switch during work |
+| `on_work_end`   | work ends (naturally or with `n`); timer paused during work; `q`, profile or mode switch during work |
 
 Environment variables passed to hooks:
 `POMO_EVENT` (`start`/`resume` for the start hook, `end`/`pause`/`quit`/`switch` for the end hook),
