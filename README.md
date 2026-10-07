@@ -68,13 +68,15 @@ pomo --lang en          # force the UI language
 ```
 
 Keys: `space` pause/resume · `n` next phase · `r` reset · `p` switch profile · `q` quit.
+Waybar: click = pause/resume, right click = next phase.
 
 `p` opens a menu listing the profiles (the config file is reread, so profiles added while pomo
 runs show up). Move with `↑`/`↓` or `j`/`k`, press `Enter` to load the profile, `Esc` to cancel.
 Loading a profile resets the app as if it had just been launched with `-p NAME`: the timer and
 pomodoro count start over, and CLI duration/hook overrides no longer apply (`--no-hooks` and
 `--lang` are kept).
-Waybar: click = pause/resume, right click = next phase.
+
+![Profile menu](docs/screenshots/profile-menu.png)
 
 ## Configuration
 
