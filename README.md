@@ -1,8 +1,9 @@
 # pomo
 
-Pomodoro TUI (Textual) qui pilote mpv via MPRIS, envoie des notifications et s'affiche dans waybar.
+Pomodoro TUI (Textual) qui lance des commandes au début et à la fin des périodes de travail
+(par défaut : play/pause de mpv via MPRIS), envoie des notifications et s'affiche dans waybar.
 
-Dépendances : `python-textual`, `mpv-mpris`, `playerctl`, `libnotify`, `waybar`.
+Dépendances : `python-textual`, `libnotify`, `waybar` ; pour les commandes par défaut : `mpv`, `mpv-mpris`, `playerctl`.
 
 ## Installation
 
@@ -56,7 +57,38 @@ pomo                 # profil par défaut
 pomo -p deep         # profil « deep »
 pomo -w 40 -s 8 -c 2 # travail / pause / répétitions (priment sur le profil)
 pomo -L              # lister les profils
+pomo --debut-travail "CMD" --fin-travail "CMD"   # commandes ponctuelles
+pomo --no-hooks      # ne lancer aucune commande
 ```
+
+## Commandes de début / fin de travail
+
+Deux commandes shell, configurables :
+
+| Config (`config.toml`) | CLI               | Quand                                                        | Défaut                       |
+|------------------------|-------------------|--------------------------------------------------------------|------------------------------|
+| `debut_travail`        | `--debut-travail` | début d'une période de travail, reprise du minuteur          | `playerctl -a -p mpv play`   |
+| `fin_travail`          | `--fin-travail`   | fin du travail (naturelle ou `n`), pause du minuteur, `q`    | `playerctl -a -p mpv pause`  |
+
+Priorité : défauts < section `[commandes]` (tous les profils) < profil < options CLI.
+Une chaîne vide `""` désactive la commande.
+
+```toml
+[commandes]                       # pour tous les profils
+debut_travail = "playerctl -a -p mpv play"
+fin_travail = "playerctl -a -p mpv pause"
+
+[profils.silence]                 # surcharge pour un profil
+travail = 25
+pause = 5
+repetitions = 4
+debut_travail = ""
+fin_travail = '[ "$POMO_EVENT" = pause ] || echo "fin $POMO_PROFILE" >> ~/.local/state/pomo.log'
+```
+
+Variables d'environnement transmises aux commandes :
+`POMO_EVENT` (`start`/`resume` au début, `end`/`pause`/`quit` à la fin), `POMO_PROFILE`,
+`POMO_DONE` (pomodoros terminés), `POMO_CYCLES`, `POMO_WORK_MIN`.
 
 Touches : `espace` pause/reprise · `n` phase suivante · `r` reset · `q` quitter.
 Waybar : clic = pause/reprise, clic droit = phase suivante.

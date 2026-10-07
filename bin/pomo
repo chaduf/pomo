@@ -1,8 +1,10 @@
 #!/usr/bin/python3
-"""pomo — minuteur Pomodoro TUI qui pilote mpv (via MPRIS/playerctl),
+"""pomo — minuteur Pomodoro TUI qui lance des commandes au début et à la fin
+des périodes de travail (par défaut : play/pause de mpv via playerctl),
 envoie des notifications et expose son état à waybar.
 
 Profils : ~/.config/pomo/config.toml  (pomo -L pour les lister, pomo -p NOM)
+Commandes : debut_travail / fin_travail (config) ou --debut-travail / --fin-travail (CLI)
 Touches : espace = pause/reprise, n = phase suivante, r = reset phase, q = quitter
 Signaux : SIGUSR1 = pause/reprise, SIGUSR2 = phase suivante (utilisés par waybar)
 """
@@ -36,13 +38,17 @@ def sh(*cmd: str) -> str:
         return ""
 
 
-def mpv_players() -> list[str]:
-    return [p for p in sh("playerctl", "-l").split() if p.startswith("mpv")]
-
-
-def mpv(action: str) -> None:
-    for p in mpv_players():
-        sh("playerctl", "-p", p, action)
+def run_hook(cmd: str, env: dict[str, str]) -> None:
+    """Lance une commande shell utilisateur sans bloquer le TUI."""
+    if not cmd.strip():
+        return
+    try:
+        subprocess.Popen(
+            ["sh", "-c", cmd], env={**os.environ, **env}, start_new_session=True,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        pass
 
 
 def notify(title: str, body: str, icon: str, urgency: str = "normal") -> None:
@@ -79,12 +85,13 @@ class Pomo(App):
         super().__init__()
         self.durations = {WORK: args.work * 60, SHORT: args.short * 60, LONG: args.long * 60}
         self.cycles = args.cycles
-        self.control_mpv = not args.no_mpv
+        self.hooks = {} if args.no_hooks else {"start": args.work_start, "end": args.work_end}
         self.profile = args.profile
         self.phase = WORK
         self.done_pomodoros = 0
         self.remaining = float(self.durations[WORK])
         self.running = False
+        self.started = False  # le premier « espace » est un début, pas une reprise
         self.last_tick = time.monotonic()
 
     def compose(self) -> ComposeResult:
@@ -109,12 +116,16 @@ class Pomo(App):
 
     # ---- logique -------------------------------------------------------
     def start_phase(self, phase: str, announce: bool = True) -> None:
+        leaving_work = self.phase == WORK and self.running
         self.phase = phase
         self.remaining = float(self.durations[phase])
         self.running = True
+        self.started = True
         self.last_tick = time.monotonic()
-        if self.control_mpv:
-            mpv("play" if phase == WORK else "pause")
+        if phase == WORK:
+            self.hook("start", "start")
+        elif leaving_work:
+            self.hook("end", "end")
         if announce:
             if phase == WORK:
                 notify("🍅 Au travail !", f"Session {self.done_pomodoros % self.cycles + 1}/{self.cycles} "
@@ -146,8 +157,12 @@ class Pomo(App):
     def action_toggle(self) -> None:
         self.running = not self.running
         self.last_tick = time.monotonic()
-        if self.control_mpv and self.phase == WORK:
-            mpv("play" if self.running else "pause")
+        if self.phase == WORK:
+            if self.running:
+                self.hook("start", "resume" if self.started else "start")
+            else:
+                self.hook("end", "pause")
+        self.started = True
         self.render_state()
 
     def action_skip(self) -> None:
@@ -158,9 +173,19 @@ class Pomo(App):
         self.render_state()
 
     async def action_quit(self) -> None:
+        if self.phase == WORK and self.running:
+            self.hook("end", "quit")
         STATE_FILE.unlink(missing_ok=True)
         refresh_waybar()
         self.exit()
+
+    def hook(self, which: str, event: str) -> None:
+        """which : start|end ; event : start|resume (début) ou end|pause|quit (fin)."""
+        run_hook(self.hooks.get(which, ""), {
+            "POMO_EVENT": event, "POMO_PROFILE": self.profile or "",
+            "POMO_DONE": str(self.done_pomodoros), "POMO_CYCLES": str(self.cycles),
+            "POMO_WORK_MIN": str(self.durations[WORK] // 60),
+        })
 
     # ---- affichage -----------------------------------------------------
     def render_state(self) -> None:
@@ -196,35 +221,51 @@ class Pomo(App):
 
 
 CONFIG_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "pomo" / "config.toml"
-DEFAULTS = {"work": 25, "short": 5, "long": 15, "cycles": 4}
+DEFAULTS = {
+    "work": 25, "short": 5, "long": 15, "cycles": 4,
+    "work_start": "playerctl -a -p mpv play",
+    "work_end": "playerctl -a -p mpv pause",
+}
 # clés du fichier de config -> paramètres internes
-CONFIG_KEYS = {"travail": "work", "pause": "short", "pause_longue": "long", "repetitions": "cycles"}
+INT_KEYS = {"travail": "work", "pause": "short", "pause_longue": "long", "repetitions": "cycles"}
+STR_KEYS = {"debut_travail": "work_start", "fin_travail": "work_end"}
+CONFIG_KEYS = INT_KEYS | STR_KEYS
 
 
-def load_profiles() -> tuple[dict, str | None]:
+def load_config() -> dict:
     if not CONFIG_FILE.exists():
-        return {}, None
+        return {}
     try:
         with CONFIG_FILE.open("rb") as f:
-            cfg = tomllib.load(f)
+            return tomllib.load(f)
     except tomllib.TOMLDecodeError as e:
         raise SystemExit(f"pomo : erreur dans {CONFIG_FILE} : {e}")
-    return cfg.get("profils", {}), cfg.get("defaut")
+
+
+def parse_values(table: dict, where: str, allowed: dict) -> dict:
+    values = {}
+    for key, val in table.items():
+        if key not in allowed:
+            raise SystemExit(f"pomo : clé inconnue « {key} » dans {where} "
+                             f"(attendu : {', '.join(allowed)})")
+        if key in INT_KEYS and (not isinstance(val, int) or isinstance(val, bool) or val <= 0):
+            raise SystemExit(f"pomo : « {key} » doit être un entier > 0 ({where})")
+        if key in STR_KEYS and not isinstance(val, str):
+            raise SystemExit(f"pomo : « {key} » doit être une chaîne ({where})")
+        values[allowed[key]] = val
+    return values
+
+
+def global_values(cfg: dict) -> dict:
+    """Commandes définies dans [commandes] : s'appliquent à tous les profils."""
+    return parse_values(cfg.get("commandes", {}), "[commandes]", STR_KEYS)
 
 
 def profile_values(profiles: dict, name: str) -> dict:
     if name not in profiles:
         dispo = ", ".join(profiles) or "aucun"
         raise SystemExit(f"pomo : profil « {name} » introuvable (disponibles : {dispo})")
-    values = {}
-    for key, val in profiles[name].items():
-        if key not in CONFIG_KEYS:
-            raise SystemExit(f"pomo : clé inconnue « {key} » dans le profil « {name} » "
-                             f"(attendu : {', '.join(CONFIG_KEYS)})")
-        if not isinstance(val, int) or val <= 0:
-            raise SystemExit(f"pomo : « {key} » doit être un entier > 0 (profil « {name} »)")
-        values[CONFIG_KEYS[key]] = val
-    return values
+    return parse_values(profiles[name], f"le profil « {name} »", CONFIG_KEYS)
 
 
 def positive_int(v: str) -> int:
@@ -235,10 +276,14 @@ def positive_int(v: str) -> int:
 
 
 def main() -> None:
-    profiles, default_profile = load_profiles()
+    cfg = load_config()
+    profiles, default_profile = cfg.get("profils", {}), cfg.get("defaut")
+    base = {**DEFAULTS, **global_values(cfg)}
     ap = argparse.ArgumentParser(
-        description="Pomodoro TUI piloté mpv",
-        epilog=f"Profils : {CONFIG_FILE}. Priorité : défauts < profil < options CLI.",
+        description="Pomodoro TUI : lance des commandes au début/à la fin du travail (mpv par défaut)",
+        epilog=f"Config : {CONFIG_FILE}. Priorité : défauts < [commandes] < profil < options CLI. "
+               "Les commandes reçoivent POMO_EVENT (start|resume|end|pause|quit), POMO_PROFILE, "
+               "POMO_DONE, POMO_CYCLES, POMO_WORK_MIN.",
     )
     ap.add_argument("-p", "--profile", help="profil à utiliser (défaut : « defaut » du fichier de config)")
     ap.add_argument("-L", "--list", action="store_true", help="lister les profils et quitter")
@@ -247,27 +292,33 @@ def main() -> None:
     ap.add_argument("-c", "--cycles", type=positive_int,
                     help=f"répétitions (pomodoros) avant la pause longue ({DEFAULTS['cycles']})")
     ap.add_argument("-l", "--long", type=positive_int, help=f"minutes de pause longue ({DEFAULTS['long']})")
-    ap.add_argument("--no-mpv", action="store_true", help="ne pas contrôler mpv")
+    ap.add_argument("--debut-travail", dest="work_start", metavar="CMD",
+                    help=f"commande au début du travail (« {DEFAULTS['work_start']} »)")
+    ap.add_argument("--fin-travail", dest="work_end", metavar="CMD",
+                    help=f"commande à la fin du travail (« {DEFAULTS['work_end']} »)")
+    ap.add_argument("--no-hooks", "--no-mpv", dest="no_hooks", action="store_true",
+                    help="ne lancer aucune commande")
     args = ap.parse_args()
 
     if args.list:
         if not profiles:
             print(f"Aucun profil ({CONFIG_FILE})")
         for name in profiles:
-            v = {**DEFAULTS, **profile_values(profiles, name)}
+            v = {**base, **profile_values(profiles, name)}
             mark = "*" if name == default_profile else " "
             print(f"{mark} {name:<12} travail {v['work']} min · pause {v['short']} min · "
                   f"pause longue {v['long']} min · {v['cycles']} répétitions")
+            print(f"  {'':<12} début : {v['work_start'] or '(rien)'}  ·  fin : {v['work_end'] or '(rien)'}")
         return
 
     name = args.profile or default_profile
-    settings = dict(DEFAULTS)
+    settings = dict(base)
     if name:
         settings.update(profile_values(profiles, name))
     for key in DEFAULTS:  # les options CLI explicites priment
         if getattr(args, key) is not None:
             settings[key] = getattr(args, key)
-    args = argparse.Namespace(**settings, no_mpv=args.no_mpv, profile=name)
+    args = argparse.Namespace(**settings, no_hooks=args.no_hooks, profile=name)
 
     try:
         Pomo(args).run()

@@ -4,14 +4,34 @@
 #                pomo -p deep       -> profil « deep »
 #                pomo -p deep -w 60 -> profil « deep », mais 60 min de travail
 #                pomo -L            -> liste des profils
+#                pomo --debut-travail "CMD" --fin-travail "CMD"  -> commandes ponctuelles
 #
 # Clés d'un profil (en minutes, entiers > 0) :
 #   travail      durée d'une session de travail        (défaut : 25)
 #   pause        durée de la pause courte               (défaut : 5)
 #   repetitions  nb de sessions avant la pause longue   (défaut : 4)
 #   pause_longue durée de la pause longue (optionnel)   (défaut : 15)
+#
+# Commandes shell lancées au début / à la fin d'une période de travail
+# (dans [commandes] pour tous les profils, ou dans un profil pour le surcharger) :
+#   debut_travail  début du travail, et reprise après une pause du minuteur
+#                  (défaut : "playerctl -a -p mpv play")
+#   fin_travail    fin du travail, pause du minuteur, ou sortie de pomo pendant le travail
+#                  (défaut : "playerctl -a -p mpv pause")
+#   "" = ne rien faire.
+#
+# Variables d'environnement disponibles dans les commandes :
+#   POMO_EVENT     start | resume (début)  ·  end | pause | quit (fin)
+#   POMO_PROFILE   nom du profil
+#   POMO_DONE      nb de pomodoros terminés
+#   POMO_CYCLES    répétitions avant la pause longue
+#   POMO_WORK_MIN  durée du travail en minutes
 
 defaut = "classique"
+
+[commandes]
+debut_travail = "playerctl -a -p mpv play"
+fin_travail = "playerctl -a -p mpv pause"
 
 [profils.classique]
 travail = 25
@@ -29,3 +49,12 @@ pause_longue = 30
 travail = 15
 pause = 3
 repetitions = 4
+
+# Exemple : sans musique, mais on note chaque fin de session dans un journal
+# (sauf quand on met juste le minuteur en pause)
+[profils.silence]
+travail = 25
+pause = 5
+repetitions = 4
+debut_travail = ""
+fin_travail = '[ "$POMO_EVENT" = pause ] || echo "$(date "+%F %T") fin ($POMO_EVENT) - $POMO_PROFILE" >> ~/.local/state/pomo.log'
