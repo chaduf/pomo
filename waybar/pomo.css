@@ -1,0 +1,9 @@
+/* ---- pomo (pomodoro) ---- */
+#custom-pomo {
+  padding: 0 10px;
+  margin-left: 6px;
+}
+#custom-pomo.work   { color: @red; }
+#custom-pomo.short,
+#custom-pomo.long   { color: @green; }
+#custom-pomo.paused { color: @lavender; opacity: 0.6; }

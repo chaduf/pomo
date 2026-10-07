@@ -1,0 +1,13 @@
+{
+  "custom/pomo": {
+    "format": "{}",
+    "return-type": "json",
+    "exec": "~/.config/waybar/scripts/pomo.py",
+    "interval": 1,
+    "signal": 9,
+    "hide-empty-text": true,
+    "tooltip": true,
+    "on-click": "~/.config/waybar/scripts/pomo.py toggle",
+    "on-click-right": "~/.config/waybar/scripts/pomo.py skip",
+  },
+}

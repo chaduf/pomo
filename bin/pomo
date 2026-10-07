@@ -1,0 +1,280 @@
+#!/usr/bin/python3
+"""pomo — minuteur Pomodoro TUI qui pilote mpv (via MPRIS/playerctl),
+envoie des notifications et expose son état à waybar.
+
+Profils : ~/.config/pomo/config.toml  (pomo -L pour les lister, pomo -p NOM)
+Touches : espace = pause/reprise, n = phase suivante, r = reset phase, q = quitter
+Signaux : SIGUSR1 = pause/reprise, SIGUSR2 = phase suivante (utilisés par waybar)
+"""
+import argparse
+import asyncio
+import json
+import os
+import signal
+import subprocess
+import time
+import tomllib
+from pathlib import Path
+
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import Center, Middle
+from textual.widgets import Digits, Footer, Label, ProgressBar
+
+STATE_FILE = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "pomo.json"
+WAYBAR_SIGNAL = 9  # doit correspondre à "signal" dans le module waybar
+
+WORK, SHORT, LONG = "work", "short", "long"
+LABELS = {WORK: "Travail", SHORT: "Pause courte", LONG: "Pause longue"}
+ICONS = {WORK: "🍅", SHORT: "☕", LONG: "🌴"}
+
+
+def sh(*cmd: str) -> str:
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=3).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def mpv_players() -> list[str]:
+    return [p for p in sh("playerctl", "-l").split() if p.startswith("mpv")]
+
+
+def mpv(action: str) -> None:
+    for p in mpv_players():
+        sh("playerctl", "-p", p, action)
+
+
+def notify(title: str, body: str, icon: str, urgency: str = "normal") -> None:
+    subprocess.Popen(
+        ["notify-send", "-a", "pomo", "-u", urgency, "-i", icon,
+         "-h", "string:x-canonical-private-synchronous:pomo", title, body],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+
+def refresh_waybar() -> None:
+    sh("pkill", f"-RTMIN+{WAYBAR_SIGNAL}", "-x", "waybar")
+
+
+class Pomo(App):
+    CSS = """
+    Screen { align: center middle; }
+    #phase { text-style: bold; margin-bottom: 1; width: auto; }
+    Digits { width: auto; }
+    ProgressBar { margin-top: 1; }
+    #info { color: $text-muted; margin-top: 1; width: auto; }
+    .work #phase { color: $error; }
+    .short #phase, .long #phase { color: $success; }
+    .paused Digits { color: $text-disabled; }
+    """
+    BINDINGS = [
+        Binding("space", "toggle", "Pause/Reprise"),
+        Binding("n", "skip", "Phase suivante"),
+        Binding("r", "reset", "Reset phase"),
+        Binding("q", "quit", "Quitter"),
+    ]
+
+    def __init__(self, args: argparse.Namespace) -> None:
+        super().__init__()
+        self.durations = {WORK: args.work * 60, SHORT: args.short * 60, LONG: args.long * 60}
+        self.cycles = args.cycles
+        self.control_mpv = not args.no_mpv
+        self.profile = args.profile
+        self.phase = WORK
+        self.done_pomodoros = 0
+        self.remaining = float(self.durations[WORK])
+        self.running = False
+        self.last_tick = time.monotonic()
+
+    def compose(self) -> ComposeResult:
+        with Middle():
+            with Center():
+                yield Label(id="phase")
+            with Center():
+                yield Digits(id="clock")
+            with Center():
+                yield ProgressBar(show_eta=False, show_percentage=False, id="bar")
+            with Center():
+                yield Label(id="info")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.title = "pomo"
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(signal.SIGUSR1, self.action_toggle)
+        loop.add_signal_handler(signal.SIGUSR2, self.action_skip)
+        self.set_interval(0.25, self.tick)
+        self.render_state()  # on attend « espace » pour démarrer
+
+    # ---- logique -------------------------------------------------------
+    def start_phase(self, phase: str, announce: bool = True) -> None:
+        self.phase = phase
+        self.remaining = float(self.durations[phase])
+        self.running = True
+        self.last_tick = time.monotonic()
+        if self.control_mpv:
+            mpv("play" if phase == WORK else "pause")
+        if announce:
+            if phase == WORK:
+                notify("🍅 Au travail !", f"Session {self.done_pomodoros % self.cycles + 1}/{self.cycles} "
+                       f"— {self.durations[WORK] // 60} min", "appointment-soon", "critical")
+            else:
+                notify(f"{ICONS[phase]} {LABELS[phase]}", f"{self.durations[phase] // 60} min de pause "
+                       f"— {self.done_pomodoros} pomodoro(s) fait(s)", "face-smile", "critical")
+        self.render_state()
+
+    def next_phase(self) -> None:
+        if self.phase == WORK:
+            self.done_pomodoros += 1
+            nxt = LONG if self.done_pomodoros % self.cycles == 0 else SHORT
+        else:
+            nxt = WORK
+        self.start_phase(nxt)
+
+    def tick(self) -> None:
+        now = time.monotonic()
+        if self.running:
+            self.remaining -= now - self.last_tick
+            if self.remaining <= 0:
+                self.next_phase()
+                return
+        self.last_tick = now
+        self.render_state()
+
+    # ---- actions -------------------------------------------------------
+    def action_toggle(self) -> None:
+        self.running = not self.running
+        self.last_tick = time.monotonic()
+        if self.control_mpv and self.phase == WORK:
+            mpv("play" if self.running else "pause")
+        self.render_state()
+
+    def action_skip(self) -> None:
+        self.next_phase()
+
+    def action_reset(self) -> None:
+        self.remaining = float(self.durations[self.phase])
+        self.render_state()
+
+    async def action_quit(self) -> None:
+        STATE_FILE.unlink(missing_ok=True)
+        refresh_waybar()
+        self.exit()
+
+    # ---- affichage -----------------------------------------------------
+    def render_state(self) -> None:
+        secs = max(0, int(self.remaining + 0.999))
+        mm, ss = divmod(secs, 60)
+        total = self.durations[self.phase]
+        self.screen.set_classes([self.phase] + ([] if self.running else ["paused"]))
+        state = "" if self.running else "  (en pause)"
+        self.query_one("#phase", Label).update(f"{ICONS[self.phase]}  {LABELS[self.phase]}{state}")
+        self.query_one("#clock", Digits).update(f"{mm:02d}:{ss:02d}")
+        self.query_one("#bar", ProgressBar).update(total=total, progress=total - secs)
+        self.query_one("#info", Label).update(
+            (f"Profil : {self.profile}  ·  " if self.profile else "")
+            + f"Pomodoros : {self.done_pomodoros}  ·  cycle {self.done_pomodoros % self.cycles + 1}/{self.cycles}"
+        )
+        self.write_state(secs, total)
+
+    def write_state(self, secs: int, total: int) -> None:
+        data = {
+            "pid": os.getpid(), "phase": self.phase, "running": self.running,
+            "remaining": secs, "total": total, "done": self.done_pomodoros,
+            # horodatage de fin : waybar peut décompter sans attendre le TUI
+            "ends_at": time.time() + secs if self.running else None,
+        }
+        old = getattr(self, "_last_state", None)
+        if old != (self.phase, self.running, self.done_pomodoros, secs):
+            tmp = STATE_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data))
+            tmp.replace(STATE_FILE)
+            if old is None or old[:3] != (self.phase, self.running, self.done_pomodoros):
+                refresh_waybar()
+            self._last_state = (self.phase, self.running, self.done_pomodoros, secs)
+
+
+CONFIG_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "pomo" / "config.toml"
+DEFAULTS = {"work": 25, "short": 5, "long": 15, "cycles": 4}
+# clés du fichier de config -> paramètres internes
+CONFIG_KEYS = {"travail": "work", "pause": "short", "pause_longue": "long", "repetitions": "cycles"}
+
+
+def load_profiles() -> tuple[dict, str | None]:
+    if not CONFIG_FILE.exists():
+        return {}, None
+    try:
+        with CONFIG_FILE.open("rb") as f:
+            cfg = tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        raise SystemExit(f"pomo : erreur dans {CONFIG_FILE} : {e}")
+    return cfg.get("profils", {}), cfg.get("defaut")
+
+
+def profile_values(profiles: dict, name: str) -> dict:
+    if name not in profiles:
+        dispo = ", ".join(profiles) or "aucun"
+        raise SystemExit(f"pomo : profil « {name} » introuvable (disponibles : {dispo})")
+    values = {}
+    for key, val in profiles[name].items():
+        if key not in CONFIG_KEYS:
+            raise SystemExit(f"pomo : clé inconnue « {key} » dans le profil « {name} » "
+                             f"(attendu : {', '.join(CONFIG_KEYS)})")
+        if not isinstance(val, int) or val <= 0:
+            raise SystemExit(f"pomo : « {key} » doit être un entier > 0 (profil « {name} »)")
+        values[CONFIG_KEYS[key]] = val
+    return values
+
+
+def positive_int(v: str) -> int:
+    n = int(v)
+    if n <= 0:
+        raise argparse.ArgumentTypeError("doit être un entier > 0")
+    return n
+
+
+def main() -> None:
+    profiles, default_profile = load_profiles()
+    ap = argparse.ArgumentParser(
+        description="Pomodoro TUI piloté mpv",
+        epilog=f"Profils : {CONFIG_FILE}. Priorité : défauts < profil < options CLI.",
+    )
+    ap.add_argument("-p", "--profile", help="profil à utiliser (défaut : « defaut » du fichier de config)")
+    ap.add_argument("-L", "--list", action="store_true", help="lister les profils et quitter")
+    ap.add_argument("-w", "--work", type=positive_int, help=f"minutes de travail ({DEFAULTS['work']})")
+    ap.add_argument("-s", "--short", type=positive_int, help=f"minutes de pause ({DEFAULTS['short']})")
+    ap.add_argument("-c", "--cycles", type=positive_int,
+                    help=f"répétitions (pomodoros) avant la pause longue ({DEFAULTS['cycles']})")
+    ap.add_argument("-l", "--long", type=positive_int, help=f"minutes de pause longue ({DEFAULTS['long']})")
+    ap.add_argument("--no-mpv", action="store_true", help="ne pas contrôler mpv")
+    args = ap.parse_args()
+
+    if args.list:
+        if not profiles:
+            print(f"Aucun profil ({CONFIG_FILE})")
+        for name in profiles:
+            v = {**DEFAULTS, **profile_values(profiles, name)}
+            mark = "*" if name == default_profile else " "
+            print(f"{mark} {name:<12} travail {v['work']} min · pause {v['short']} min · "
+                  f"pause longue {v['long']} min · {v['cycles']} répétitions")
+        return
+
+    name = args.profile or default_profile
+    settings = dict(DEFAULTS)
+    if name:
+        settings.update(profile_values(profiles, name))
+    for key in DEFAULTS:  # les options CLI explicites priment
+        if getattr(args, key) is not None:
+            settings[key] = getattr(args, key)
+    args = argparse.Namespace(**settings, no_mpv=args.no_mpv, profile=name)
+
+    try:
+        Pomo(args).run()
+    finally:
+        STATE_FILE.unlink(missing_ok=True)
+        refresh_waybar()
+
+
+if __name__ == "__main__":
+    main()

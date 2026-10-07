@@ -1,0 +1,31 @@
+# Configuration de pomo — profils Pomodoro
+#
+# Utilisation :  pomo               -> profil « defaut » ci-dessous
+#                pomo -p deep       -> profil « deep »
+#                pomo -p deep -w 60 -> profil « deep », mais 60 min de travail
+#                pomo -L            -> liste des profils
+#
+# Clés d'un profil (en minutes, entiers > 0) :
+#   travail      durée d'une session de travail        (défaut : 25)
+#   pause        durée de la pause courte               (défaut : 5)
+#   repetitions  nb de sessions avant la pause longue   (défaut : 4)
+#   pause_longue durée de la pause longue (optionnel)   (défaut : 15)
+
+defaut = "classique"
+
+[profils.classique]
+travail = 25
+pause = 5
+repetitions = 4
+pause_longue = 15
+
+[profils.deep]
+travail = 50
+pause = 10
+repetitions = 3
+pause_longue = 30
+
+[profils.court]
+travail = 15
+pause = 3
+repetitions = 4
