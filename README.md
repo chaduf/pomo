@@ -3,6 +3,11 @@
 Pomodoro TUI (Textual) that runs commands when work periods start and end
 (default: play/pause mpv through MPRIS), sends desktop notifications and shows up in waybar.
 
+> **AI disclosure:** this project was built with AI assistance. The code, scripts and
+> documentation were largely written by Claude (Anthropic) through
+> [Claude Code](https://claude.com/claude-code), following the author's requirements and
+> direction. Review it as you would any other third-party code before relying on it.
+
 Dependencies: `python-textual`, `libnotify`, `waybar`; for the default hooks: `mpv`, `mpv-mpris`, `playerctl`.
 
 ## Installation
@@ -122,3 +127,7 @@ then the system locale (`LC_ALL`, `LC_MESSAGES`, `LANG`). Available: `en`, `fr`.
 
 To add a language, add an entry to `TRANSLATIONS` in `bin/pomo` and `waybar/scripts/pomo.py`
 (English strings are the keys).
+
+## License
+
+[MIT](LICENSE) © 2026 Charles-Henry Dufetel
