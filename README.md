@@ -186,6 +186,9 @@ Environment variables passed to hooks:
 `POMO_EVENT` (`start`/`resume` for the start hook, `end`/`pause`/`quit`/`switch` for the end hook),
 `POMO_PROFILE`, `POMO_DONE` (completed pomodoros), `POMO_CYCLES`, `POMO_WORK_MIN`.
 
+Hooks run through `sh -c` with pomo's own directory prepended to `PATH`, so `pomo-media`
+is found even when pomo is started from a launcher whose `PATH` lacks `~/.local/bin`.
+
 ### Media control (`pomo-media`)
 
 The default hooks call `pomo-media`, a small helper installed next to `pomo`:

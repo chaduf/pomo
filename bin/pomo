@@ -146,13 +146,19 @@ def sh(*cmd: str) -> str:
         return ""
 
 
+# Directory holding pomo (and pomo-media). Prepended to the hooks' PATH because launchers
+# (rofi, app menus) often run pomo without ~/.local/bin in PATH.
+BIN_DIR = str(Path(__file__).resolve().parent)
+
+
 def run_hook(cmd: str, env: dict[str, str]) -> None:
     """Run a user shell command without blocking the TUI."""
     if not cmd.strip():
         return
+    path = os.pathsep.join([BIN_DIR, os.environ.get("PATH", "")])
     try:
         subprocess.Popen(
-            ["sh", "-c", cmd], env={**os.environ, **env}, start_new_session=True,
+            ["sh", "-c", cmd], env={**os.environ, **env, "PATH": path}, start_new_session=True,
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
     except OSError:
