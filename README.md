@@ -10,13 +10,32 @@ Dépendances : `python-textual`, `mpv-mpris`, `playerctl`, `libnotify`, `waybar`
 ./install.sh               # installe (propose d'installer les dépendances manquantes via pacman)
 ./install.sh --link        # liens symboliques vers ce dossier (les modifs ici sont prises en compte)
 ./install.sh --no-waybar   # sans l'intégration waybar
-./install.sh --bar FICHIER # préciser la config de barre waybar à modifier
 ./install.sh --force       # écrase aussi config.toml et le style waybar en place
 ./install.sh --uninstall   # désinstaller (~/.config/pomo est conservé)
 ```
 
-Sans `--force`, le script ne touche pas à un `config.toml` existant. Il sauvegarde les fichiers waybar modifiés
-en `*.bak-pomo` et peut être relancé sans risque de doublon.
+Sans `--force`, le script ne touche pas à un `config.toml` existant. Il sauvegarde `style.css`
+en `*.bak-pomo` avant de le modifier et peut être relancé sans risque de doublon.
+
+> **⚠ Étape manuelle obligatoire : la config de la barre waybar.**
+> Le script **ne modifie jamais** le fichier de barre waybar (`~/.config/waybar/bars/top-bar.jsonc`,
+> ou `~/.config/waybar/config.jsonc` selon ta config). Il installe le module, mais c'est à toi
+> de l'afficher dans la barre :
+>
+> 1. ajouter le module dans `include` :
+>    ```jsonc
+>    "include": [
+>      ...
+>      "~/.config/waybar/modules/custom-pomo.jsonc",
+>    ],
+>    ```
+> 2. placer `"custom/pomo"` où tu veux dans `modules-left`, `modules-center` ou `modules-right` :
+>    ```jsonc
+>    "modules-center": ["custom/music", "custom/pomo"],
+>    ```
+> 3. recharger waybar : `pkill -SIGUSR2 waybar`
+>
+> À la désinstallation, retire ces deux lignes à la main de la même façon.
 
 ### Installation manuelle
 
@@ -28,9 +47,7 @@ en `*.bak-pomo` et peut être relancé sans risque de doublon.
 | `waybar/modules/custom-pomo.jsonc`   | `~/.config/waybar/modules/custom-pomo.jsonc`     |
 | `waybar/pomo.css`                    | à ajouter à la fin de `~/.config/waybar/style.css` |
 
-Dans la config de la barre (`bars/top-bar.jsonc`) :
-- ajouter `"~/.config/waybar/modules/custom-pomo.jsonc"` dans `include`
-- ajouter `"custom/pomo"` dans un `modules-*` (ex. `"modules-center": ["custom/music", "custom/pomo"]`)
+Puis faire l'étape manuelle de la config de barre décrite ci-dessus.
 
 ## Utilisation
 

@@ -4,9 +4,11 @@
 #   ./install.sh               installe (copie les fichiers)
 #   ./install.sh --link        installe via liens symboliques vers ce dossier
 #   ./install.sh --no-waybar   n'installe pas l'intégration waybar
-#   ./install.sh --bar FICHIER config waybar à modifier (défaut : auto-détection)
 #   ./install.sh --force       écrase aussi config.toml et le style waybar existants
 #   ./install.sh --uninstall   désinstalle (la config ~/.config/pomo est conservée)
+#
+# La config de barre waybar (ex. bars/top-bar.jsonc) n'est JAMAIS modifiée :
+# l'ajout du module "custom/pomo" se fait à la main (voir README).
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,15 +18,14 @@ POMO_CONF="$CONF_DIR/pomo"
 WAYBAR="$CONF_DIR/waybar"
 DEPS=(python python-textual mpv mpv-mpris playerctl libnotify)
 
-MODE=copy WITH_WAYBAR=1 BAR="" UNINSTALL=0 FORCE=0
+MODE=copy WITH_WAYBAR=1 UNINSTALL=0 FORCE=0
 while (($#)); do
   case "$1" in
     --link) MODE=link ;;
     --no-waybar) WITH_WAYBAR=0 ;;
-    --bar) BAR="${2:?--bar attend un fichier}"; shift ;;
     --uninstall) UNINSTALL=1 ;;
     --force) FORCE=1 ;;
-    -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Option inconnue : $1" >&2; exit 1 ;;
   esac
   shift
@@ -34,15 +35,6 @@ c_ok=$'\e[32m' c_warn=$'\e[33m' c_err=$'\e[31m' c_off=$'\e[0m'
 ok()   { echo "${c_ok}✓${c_off} $*"; }
 warn() { echo "${c_warn}!${c_off} $*"; }
 die()  { echo "${c_err}✗${c_off} $*" >&2; exit 1; }
-
-# Fichier de barre waybar : --bar, sinon bars/top-bar.jsonc, sinon config.jsonc / config
-find_bar() {
-  [[ -n "$BAR" ]] && { echo "$BAR"; return; }
-  local f
-  for f in "$WAYBAR/bars/top-bar.jsonc" "$WAYBAR/config.jsonc" "$WAYBAR/config"; do
-    [[ -f "$f" ]] && grep -q '"modules-\(left\|center\|right\)"' "$f" && { echo "$f"; return; }
-  done
-}
 
 install_file() {  # install_file SOURCE DEST MODE
   mkdir -p "$(dirname "$2")"
@@ -59,6 +51,12 @@ open(p, "w").write(s.rstrip("\n") + "\n")
 EOF
 }
 
+bar_reminder() {
+  warn "Étape manuelle : $1 dans ta config de barre waybar (ex. $WAYBAR/bars/top-bar.jsonc) :"
+  echo "    - \"~/.config/waybar/modules/custom-pomo.jsonc\" dans \"include\""
+  echo "    - \"custom/pomo\" dans \"modules-left\", \"modules-center\" ou \"modules-right\""
+}
+
 reload_waybar() {
   if pgrep -x waybar >/dev/null; then
     pkill -SIGUSR2 -x waybar && ok "waybar rechargée"
@@ -68,17 +66,13 @@ reload_waybar() {
 # ---------------------------------------------------------------- désinstallation
 if ((UNINSTALL)); then
   rm -fv "$BIN_DIR/pomo" "$WAYBAR/scripts/pomo.py" "$WAYBAR/modules/custom-pomo.jsonc"
-  if bar="$(find_bar)" && [[ -n "$bar" ]] && grep -q 'pomo' "$bar"; then
-    cp "$bar" "$bar.bak-pomo"
-    sed -i '/custom-pomo\.jsonc/d; s/,\s*"custom\/pomo"//; s/"custom\/pomo",\s*//; s/"custom\/pomo"//' "$bar"
-    ok "module retiré de $bar"
-  fi
   if [[ -f "$WAYBAR/style.css" ]] && grep -q '/\* ---- pomo (pomodoro) ---- \*/' "$WAYBAR/style.css"; then
     cp "$WAYBAR/style.css" "$WAYBAR/style.css.bak-pomo"
     remove_css "$WAYBAR/style.css"
     ok "style retiré de $WAYBAR/style.css"
   fi
   reload_waybar
+  bar_reminder "retire"
   warn "config conservée : $POMO_CONF (supprime-la à la main si besoin)"
   exit 0
 fi
@@ -120,43 +114,6 @@ if ((WITH_WAYBAR)); then
   install_file "$SRC/waybar/scripts/pomo.py" "$WAYBAR/scripts/pomo.py" 755
   install_file "$SRC/waybar/modules/custom-pomo.jsonc" "$WAYBAR/modules/custom-pomo.jsonc" 644
 
-  bar="$(find_bar || true)"
-  if [[ -z "$bar" ]]; then
-    warn "config de barre introuvable : ajoute à la main l'include et \"custom/pomo\" (voir README)"
-  elif grep -q '"custom/pomo"' "$bar"; then
-    ok "module déjà présent dans $bar"
-  else
-    cp "$bar" "$bar.bak-pomo"
-    python3 - "$bar" "$WAYBAR/modules/custom-pomo.jsonc" <<'EOF'
-import re, sys
-path, module = sys.argv[1], sys.argv[2].replace(__import__("os").path.expanduser("~"), "~")
-s = open(path).read()
-
-# 1. include : liste -> on ajoute ; chaîne -> on transforme en liste ; absent -> on crée
-m = re.search(r'"include"\s*:\s*\[', s)
-if m:
-    s = s[:m.end()] + f'\n    "{module}",' + s[m.end():]
-elif (m := re.search(r'"include"\s*:\s*("[^"]*")', s)):
-    s = s[:m.start()] + f'"include": [{m.group(1)}, "{module}"]' + s[m.end():]
-else:
-    s = re.sub(r'^\s*\{', '{\n  "include": ["' + module + '"],', s, count=1)
-
-# 2. ajoute "custom/pomo" à la fin de modules-center (sinon modules-right)
-for key in ("modules-center", "modules-right", "modules-left"):
-    m = re.search(rf'"{key}"\s*:\s*\[(.*?)\]', s, flags=re.S)
-    if m:
-        body = m.group(1)
-        stripped = body.rstrip()
-        sep = "" if not stripped.strip() or stripped.endswith(",") else ","
-        new = f'{stripped}{sep} "custom/pomo"' + body[len(stripped):]
-        s = s[:m.start(1)] + new + s[m.end(1):]
-        print(f"  ajouté à {key}")
-        break
-open(path, "w").write(s)
-EOF
-    ok "module ajouté à $bar (sauvegarde : $bar.bak-pomo)"
-  fi
-
   css="$WAYBAR/style.css"
   if [[ ! -f "$css" ]]; then
     warn "$css introuvable : ajoute le contenu de waybar/pomo.css à ton style"
@@ -171,6 +128,8 @@ EOF
       || warn "pomo.css utilise @red/@green/@lavender : adapte les couleurs si ton thème ne les définit pas"
   fi
   reload_waybar
+  echo
+  bar_reminder "ajoute (si ce n'est pas déjà fait)"
 fi
 
 echo
