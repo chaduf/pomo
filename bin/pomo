@@ -5,7 +5,7 @@ exposes its state to waybar.
 
 Config:  ~/.config/pomo/config.toml  (pomo -L to list profiles, pomo -p NAME)
 Hooks:   on_work_start / on_work_end (config) or --on-work-start / --on-work-end (CLI)
-Keys:    space = pause/resume, n = next phase, r = reset phase, q = quit
+Keys:    space = pause/resume, n = next phase, r = reset phase, p = switch profile, q = quit
 Signals: SIGUSR1 = pause/resume, SIGUSR2 = next phase (used by waybar)
 UI language: --lang, $POMO_LANG, `language` in config, then the system locale.
 """
@@ -20,8 +20,11 @@ import tomllib
 from pathlib import Path
 
 from textual.app import App, ComposeResult
-from textual.containers import Center, Middle
-from textual.widgets import Digits, Footer, Label, ProgressBar
+from textual.binding import Binding
+from textual.containers import Center, Middle, Vertical
+from textual.screen import ModalScreen
+from textual.widgets import Digits, Footer, Label, OptionList, ProgressBar
+from textual.widgets.option_list import Option
 
 STATE_FILE = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "pomo.json"
 CONFIG_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "pomo" / "config.toml"
@@ -67,10 +70,10 @@ TRANSLATIONS = {
         "Pomodoro TUI: runs commands when work starts/ends (mpv by default)":
             "Pomodoro TUI : lance des commandes au début/à la fin du travail (mpv par défaut)",
         "Config: {file}. Precedence: defaults < [hooks] < profile < CLI options. "
-        "Hooks receive POMO_EVENT (start|resume|end|pause|quit), POMO_PROFILE, "
+        "Hooks receive POMO_EVENT (start|resume|end|pause|quit|switch), POMO_PROFILE, "
         "POMO_DONE, POMO_CYCLES, POMO_WORK_MIN.":
             "Config : {file}. Priorité : défauts < [hooks] < profil < options CLI. "
-            "Les commandes reçoivent POMO_EVENT (start|resume|end|pause|quit), POMO_PROFILE, "
+            "Les commandes reçoivent POMO_EVENT (start|resume|end|pause|quit|switch), POMO_PROFILE, "
             "POMO_DONE, POMO_CYCLES, POMO_WORK_MIN.",
         "profile to use (default: default_profile from the config file)":
             "profil à utiliser (défaut : default_profile du fichier de config)",
@@ -83,6 +86,11 @@ TRANSLATIONS = {
         "command run when work ends (\"{default}\")": "commande à la fin du travail (« {default} »)",
         "do not run any hook": "ne lancer aucune commande",
         "UI language: {langs} (default: auto)": "langue de l'interface : {langs} (défaut : auto)",
+        "Profiles": "Profils",
+        "Choose a profile": "Choisir un profil",
+        "↑↓ / j k: move · Enter: select · Esc: cancel": "↑↓ / j k : naviguer · Entrée : valider · Échap : annuler",
+        "No profiles in {file}": "Aucun profil dans {file}",
+        "Profile '{name}' loaded": "Profil « {name} » chargé",
     },
 }
 LANGUAGES = ("en", *TRANSLATIONS)
@@ -104,6 +112,10 @@ def resolve_language(*candidates: str | None) -> str:
         if code:
             return code if code in LANGUAGES else "en"
     return "en"
+
+
+class ConfigError(Exception):
+    """Invalid config: fatal at startup, shown as an in-app error when switching profiles."""
 
 
 def fail(message: str) -> None:
@@ -160,12 +172,18 @@ class Pomo(App):
     .paused Digits { color: $text-disabled; }
     """
 
-    def __init__(self, args: argparse.Namespace) -> None:
+    def __init__(self, settings: dict, profile: str | None, no_hooks: bool) -> None:
         super().__init__()
-        self.durations = {WORK: args.work * 60, SHORT: args.short_break * 60, LONG: args.long_break * 60}
-        self.cycles = args.cycles
-        self.hooks = {} if args.no_hooks else {"start": args.on_work_start, "end": args.on_work_end}
-        self.profile = args.profile
+        self.no_hooks = no_hooks
+        self.load_profile(settings, profile)
+
+    def load_profile(self, settings: dict, profile: str | None) -> None:
+        """Apply settings and reset the timer to its freshly launched state."""
+        self.durations = {WORK: settings["work"] * 60, SHORT: settings["short_break"] * 60,
+                          LONG: settings["long_break"] * 60}
+        self.cycles = settings["cycles"]
+        self.hooks = {} if self.no_hooks else {"start": settings["on_work_start"], "end": settings["on_work_end"]}
+        self.profile = profile
         self.phase = WORK
         self.done_pomodoros = 0
         self.remaining = float(self.durations[WORK])
@@ -187,10 +205,12 @@ class Pomo(App):
 
     def on_mount(self) -> None:
         self.title = "pomo"
+        self.main_screen = self.screen  # the profile menu is pushed on top of it
         # bound at runtime so descriptions use the resolved language
         self.bind("space", "toggle", description=_("Pause/Resume"))
         self.bind("n", "skip", description=_("Next phase"))
         self.bind("r", "reset", description=_("Reset phase"))
+        self.bind("p", "profiles", description=_("Profiles"))
         self.bind("q", "quit", description=_("Quit"))
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGUSR1, self.action_toggle)
@@ -260,6 +280,30 @@ class Pomo(App):
         self.remaining = float(self.durations[self.phase])
         self.render_state()
 
+    def action_profiles(self) -> None:
+        if isinstance(self.screen, ProfileMenu):
+            return
+        try:
+            cfg = load_config()  # reread so profiles added since launch show up
+            profiles = cfg.get("profiles", {})
+            if not profiles:
+                raise ConfigError(_("No profiles in {file}", file=CONFIG_FILE))
+            entries = {name: resolve_settings(cfg, name) for name in profiles}
+        except ConfigError as e:
+            self.notify(str(e), severity="error")
+            return
+
+        def switch(name: str | None) -> None:
+            if name is None:
+                return
+            if self.phase == WORK and self.running:
+                self.hook("end", "switch")
+            self.load_profile(entries[name], name)
+            self.render_state()
+            self.notify(_("Profile '{name}' loaded", name=name))
+
+        self.push_screen(ProfileMenu(entries, self.profile), switch)
+
     async def action_quit(self) -> None:
         if self.phase == WORK and self.running:
             self.hook("end", "quit")
@@ -268,7 +312,7 @@ class Pomo(App):
         self.exit()
 
     def hook(self, which: str, event: str) -> None:
-        """which: start|end; event: start|resume (start) or end|pause|quit (end)."""
+        """which: start|end; event: start|resume (start) or end|pause|quit|switch (end)."""
         run_hook(self.hooks.get(which, ""), {
             "POMO_EVENT": event, "POMO_PROFILE": self.profile or "",
             "POMO_DONE": str(self.done_pomodoros), "POMO_CYCLES": str(self.cycles),
@@ -280,12 +324,13 @@ class Pomo(App):
         secs = max(0, int(self.remaining + 0.999))
         mm, ss = divmod(secs, 60)
         total = self.durations[self.phase]
-        self.screen.set_classes([self.phase] + ([] if self.running else ["paused"]))
+        screen = self.main_screen
+        screen.set_classes([self.phase] + ([] if self.running else ["paused"]))
         state = "" if self.running else _(" (paused)")
-        self.query_one("#phase", Label).update(f"{ICONS[self.phase]}  {phase_label(self.phase)}{state}")
-        self.query_one("#clock", Digits).update(f"{mm:02d}:{ss:02d}")
-        self.query_one("#bar", ProgressBar).update(total=total, progress=total - secs)
-        self.query_one("#info", Label).update(
+        screen.query_one("#phase", Label).update(f"{ICONS[self.phase]}  {phase_label(self.phase)}{state}")
+        screen.query_one("#clock", Digits).update(f"{mm:02d}:{ss:02d}")
+        screen.query_one("#bar", ProgressBar).update(total=total, progress=total - secs)
+        screen.query_one("#info", Label).update(
             (_("Profile: {name}  ·  ", name=self.profile) if self.profile else "")
             + _("Pomodoros: {done}  ·  cycle {n}/{total}", done=self.done_pomodoros,
                 n=self.done_pomodoros % self.cycles + 1, total=self.cycles)
@@ -309,6 +354,53 @@ class Pomo(App):
             self._last_state = (self.phase, self.running, self.done_pomodoros, secs)
 
 
+class ProfileList(OptionList):
+    BINDINGS = [
+        Binding("j", "cursor_down", show=False),
+        Binding("k", "cursor_up", show=False),
+    ]
+
+
+class ProfileMenu(ModalScreen[str | None]):
+    """Profile picker: returns the chosen profile name, or None if cancelled."""
+
+    CSS = """
+    ProfileMenu { align: center middle; }
+    #menu { width: auto; max-width: 90%; height: auto; padding: 1 2;
+            border: round $accent; background: $surface; }
+    #menu-title { text-style: bold; margin-bottom: 1; }
+    ProfileList { width: auto; height: auto; max-height: 20; border: none; }
+    #menu-help { color: $text-muted; margin-top: 1; }
+    """
+    BINDINGS = [Binding("escape", "dismiss(None)", show=False)]
+
+    def __init__(self, entries: dict[str, dict], current: str | None) -> None:
+        super().__init__()
+        self.entries = entries
+        self.current = current
+
+    def compose(self) -> ComposeResult:
+        options = [
+            Option(f"{'●' if name == self.current else ' '} {name:<12} " + _(
+                "work {work} min · break {short} min · long break {long} min · {cycles} cycles",
+                work=v["work"], short=v["short_break"], long=v["long_break"], cycles=v["cycles"]), id=name)
+            for name, v in self.entries.items()
+        ]
+        with Vertical(id="menu"):
+            yield Label(_("Choose a profile"), id="menu-title")
+            yield ProfileList(*options)
+            yield Label(_("↑↓ / j k: move · Enter: select · Esc: cancel"), id="menu-help")
+
+    def on_mount(self) -> None:
+        menu = self.query_one(ProfileList)
+        names = list(self.entries)
+        menu.highlighted = names.index(self.current) if self.current in names else 0
+        menu.focus()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(event.option.id)
+
+
 # ---------------------------------------------------------------- config
 DEFAULTS = {
     "work": 25, "short_break": 5, "long_break": 15, "cycles": 4,
@@ -327,9 +419,9 @@ def load_config() -> dict:
         with CONFIG_FILE.open("rb") as f:
             cfg = tomllib.load(f)
     except tomllib.TOMLDecodeError as e:
-        fail(_("error in {file}: {error}", file=CONFIG_FILE, error=e))
+        raise ConfigError(_("error in {file}: {error}", file=CONFIG_FILE, error=e))
     if any(k in cfg for k in LEGACY_KEYS):
-        fail(_("{file} uses the old French keys (profils, defaut, commandes...): "
+        raise ConfigError(_("{file} uses the old French keys (profils, defaut, commandes...): "
                "update it, see config.toml in the project", file=CONFIG_FILE))
     return cfg
 
@@ -337,20 +429,28 @@ def load_config() -> dict:
 def parse_values(table: dict, where: str, allowed: tuple[str, ...]) -> dict:
     for key, val in table.items():
         if key not in allowed:
-            fail(_("unknown key '{key}' in {where} (expected: {keys})",
+            raise ConfigError(_("unknown key '{key}' in {where} (expected: {keys})",
                    key=key, where=where, keys=", ".join(allowed)))
         if key in INT_KEYS and (not isinstance(val, int) or isinstance(val, bool) or val <= 0):
-            fail(_("'{key}' must be an integer > 0 ({where})", key=key, where=where))
+            raise ConfigError(_("'{key}' must be an integer > 0 ({where})", key=key, where=where))
         if key in HOOK_KEYS and not isinstance(val, str):
-            fail(_("'{key}' must be a string ({where})", key=key, where=where))
+            raise ConfigError(_("'{key}' must be a string ({where})", key=key, where=where))
     return dict(table)
 
 
 def profile_values(profiles: dict, name: str) -> dict:
     if name not in profiles:
-        fail(_("profile '{name}' not found (available: {names})",
+        raise ConfigError(_("profile '{name}' not found (available: {names})",
                name=name, names=", ".join(profiles) or _("none")))
     return parse_values(profiles[name], _("profile '{name}'", name=name), INT_KEYS + HOOK_KEYS)
+
+
+def resolve_settings(cfg: dict, profile: str | None) -> dict:
+    """defaults < [hooks] < profile."""
+    settings = {**DEFAULTS, **parse_values(cfg.get("hooks", {}), "[hooks]", HOOK_KEYS)}
+    if profile:
+        settings.update(profile_values(cfg.get("profiles", {}), profile))
+    return settings
 
 
 def positive_int(v: str) -> int:
@@ -364,7 +464,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description=_("Pomodoro TUI: runs commands when work starts/ends (mpv by default)"),
         epilog=_("Config: {file}. Precedence: defaults < [hooks] < profile < CLI options. "
-                 "Hooks receive POMO_EVENT (start|resume|end|pause|quit), POMO_PROFILE, "
+                 "Hooks receive POMO_EVENT (start|resume|end|pause|quit|switch), POMO_PROFILE, "
                  "POMO_DONE, POMO_CYCLES, POMO_WORK_MIN.", file=CONFIG_FILE),
     )
     ap.add_argument("-p", "--profile", help=_("profile to use (default: default_profile from the config file)"))
@@ -393,18 +493,27 @@ def main() -> None:
     pre.add_argument("--lang")
     cli_lang = pre.parse_known_args()[0].lang
     lang = resolve_language(cli_lang, os.environ.get("POMO_LANG"))
-    cfg = load_config()
+    try:
+        cfg = load_config()
+    except ConfigError as e:
+        fail(str(e))
     lang = resolve_language(cli_lang, os.environ.get("POMO_LANG"), cfg.get("language"))
 
     args = build_parser().parse_args()
+    try:
+        run(args, cfg)
+    except ConfigError as e:
+        fail(str(e))
+
+
+def run(args: argparse.Namespace, cfg: dict) -> None:
     profiles, default_profile = cfg.get("profiles", {}), cfg.get("default_profile")
-    base = {**DEFAULTS, **parse_values(cfg.get("hooks", {}), "[hooks]", HOOK_KEYS)}
 
     if args.list:
         if not profiles:
             print(_("No profiles ({file})", file=CONFIG_FILE))
         for name in profiles:
-            v = {**base, **profile_values(profiles, name)}
+            v = resolve_settings(cfg, name)
             mark = "*" if name == default_profile else " "
             print(f"{mark} {name:<12} " + _(
                 "work {work} min · break {short} min · long break {long} min · {cycles} cycles",
@@ -415,15 +524,13 @@ def main() -> None:
         return
 
     name = args.profile or default_profile
-    settings = dict(base)
-    if name:
-        settings.update(profile_values(profiles, name))
+    settings = resolve_settings(cfg, name)
     for key in DEFAULTS:  # explicit CLI options win
         if getattr(args, key) is not None:
             settings[key] = getattr(args, key)
 
     try:
-        Pomo(argparse.Namespace(**settings, no_hooks=args.no_hooks, profile=name)).run()
+        Pomo(settings, name, args.no_hooks).run()
     finally:
         STATE_FILE.unlink(missing_ok=True)
         refresh_waybar()

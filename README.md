@@ -67,7 +67,13 @@ pomo --no-hooks         # run no hook at all
 pomo --lang en          # force the UI language
 ```
 
-Keys: `space` pause/resume · `n` next phase · `r` reset · `q` quit.
+Keys: `space` pause/resume · `n` next phase · `r` reset · `p` switch profile · `q` quit.
+
+`p` opens a menu listing the profiles (the config file is reread, so profiles added while pomo
+runs show up). Move with `↑`/`↓` or `j`/`k`, press `Enter` to load the profile, `Esc` to cancel.
+Loading a profile resets the app as if it had just been launched with `-p NAME`: the timer and
+pomodoro count start over, and CLI duration/hook overrides no longer apply (`--no-hooks` and
+`--lang` are kept).
 Waybar: click = pause/resume, right click = next phase.
 
 ## Configuration
@@ -113,10 +119,10 @@ Precedence: defaults < `[hooks]` < profile < CLI options. An empty string `""` d
 | Hook            | Runs when                                                                    |
 |-----------------|------------------------------------------------------------------------------|
 | `on_work_start` | a work period starts; the timer resumes during work                          |
-| `on_work_end`   | work ends (naturally or with `n`); timer paused during work; `q` during work |
+| `on_work_end`   | work ends (naturally or with `n`); timer paused during work; `q` or profile switch during work |
 
 Environment variables passed to hooks:
-`POMO_EVENT` (`start`/`resume` for the start hook, `end`/`pause`/`quit` for the end hook),
+`POMO_EVENT` (`start`/`resume` for the start hook, `end`/`pause`/`quit`/`switch` for the end hook),
 `POMO_PROFILE`, `POMO_DONE` (completed pomodoros), `POMO_CYCLES`, `POMO_WORK_MIN`.
 
 ## Localization
