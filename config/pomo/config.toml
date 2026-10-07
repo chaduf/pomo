@@ -11,6 +11,8 @@
 #   short_break  length of the short break                (default: 5)
 #   cycles       work sessions before the long break      (default: 4)
 #   long_break   length of the long break (optional)      (default: 15)
+#   ics_dir      directory of the .ics file written when a cycle's work is recorded
+#                (optional, default: "~/.local/share/pomo/ics")
 #
 # Hooks: shell commands run when a work period starts / ends
 # (in [hooks] for every profile, or inside a profile to override):
@@ -44,6 +46,7 @@ work = 25
 short_break = 5
 cycles = 4
 long_break = 15
+ics_dir = "~/.local/share/pomo/ics"
 
 [profiles.deep]
 work = 50

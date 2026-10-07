@@ -90,6 +90,7 @@ pomo --on-work-start "CMD" --on-work-end "CMD"   # one-off hooks
 pomo --no-hooks         # run no hook at all
 pomo --lang en          # force the UI language
 pomo --stopwatch        # start in stopwatch mode
+pomo --export-ics       # export logged work sessions to pomo-sessions.ics
 ```
 
 ### Keys
@@ -137,6 +138,54 @@ back to the pomodoro, which restarts fresh with the current profile.
 
 ![Stopwatch mode](docs/screenshots/stopwatch.png)
 
+### Time entries and calendar export (Google Calendar)
+
+pomo records your **work time** only (breaks and stopwatch time are never recorded):
+
+- each stretch of actual work becomes a time entry: pausing the timer splits the work into
+  several entries, and `n` during work ends the entry early;
+- entries shorter than **5 minutes** are dropped;
+- nothing is written until the **end of the cycle** (when the long break starts). A form then asks
+  for a **title** (required) and a **description** (optional), with a live preview of the entries;
+  **Save** (`Ctrl+S`) records them, **Discard** drops them;
+- an unfinished cycle is not lost: the form also opens before `r`, `q` or a profile/mode switch,
+  and work left by a closed window or a crash (saved every 30 s) is offered at the next launch.
+
+Naming: a cycle with a single entry uses the title as is; with several entries they are named
+`<title>_work_<n>`, where `<n>` is the work number in the cycle, plus `.<k>` when that work was
+split by pauses (e.g. `API_work_1`, `API_work_2.1`, `API_work_2.2`, `API_work_3`).
+
+When you save, pomo writes the cycle's entries to an `.ics` file in the profile's `ics_dir`
+(default `~/.local/share/pomo/ics`, override with `--ics-dir`), named
+`YYYY-MM-DD_HHMM_<title>.ics`; the form shows the target file before you save:
+
+```toml
+[profiles.deep30]
+work = 30
+short_break = 10
+cycles = 3
+ics_dir = "~/Documents/Pomodoro"
+```
+
+All entries are also kept in `~/.local/share/pomo/sessions.jsonl`. To export several cycles at
+once as a single iCalendar file, one event per entry:
+
+```bash
+pomo --export-ics                          # -> ./pomo-sessions.ics
+pomo --export-ics ~/week.ics --since 2026-10-05 --until 2026-10-11
+pomo --export-ics - > entries.ics          # to stdout
+```
+
+To add them to Google Calendar:
+
+1. (recommended, once) create a dedicated calendar: *Settings → Add calendar → Create new
+   calendar*, e.g. "Pomodoro", so imported entries stay separate and are easy to remove;
+2. *Settings → Import & export → Import*, pick an `.ics` file from `ics_dir` (or an export) and
+   the "Pomodoro" calendar.
+
+Each event keeps the same UID across exports, so re-importing a file should not duplicate the
+entries already imported; use `--since` to export only the new ones and keep imports small.
+
 ## Configuration
 
 `~/.config/pomo/config.toml`:
@@ -171,6 +220,7 @@ on_work_end = '[ "$POMO_EVENT" = pause ] || echo "end $POMO_PROFILE" >> ~/.local
 | `cycles`        | `-c, --cycles`      | `4`  |
 | `on_work_start` | `--on-work-start`   | `pomo-media resume` |
 | `on_work_end`   | `--on-work-end`     | `pomo-media pause`  |
+| `ics_dir`       | `--ics-dir`         | `~/.local/share/pomo/ics` |
 | `language`      | `--lang`            | `auto` |
 
 Precedence: defaults < `[hooks]` < profile < CLI options. An empty string `""` disables a hook.
