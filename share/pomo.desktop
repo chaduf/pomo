@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Pomo
+GenericName=Pomodoro timer
+Comment=Pomodoro timer and stopwatch that pauses your music during breaks
+# @EXEC@ is replaced by install.sh with a command that opens pomo in a terminal
+Exec=@EXEC@
+Icon=pomo
+Terminal=false
+Categories=Utility;Clock;
+Keywords=pomodoro;timer;stopwatch;focus;tomato;minuteur;chronomètre;
+StartupWMClass=pomo

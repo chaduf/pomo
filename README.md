@@ -22,6 +22,8 @@ Dependencies: `python-textual`, `libnotify`, `playerctl`, `waybar`. To control m
 ./install.sh --link        # symlinks to this directory (edits here take effect immediately)
 ./install.sh --no-waybar   # skip the waybar integration
 ./install.sh --force       # also overwrite an existing config.toml and waybar style
+./install.sh --terminal T  # terminal used by the app launcher entry (default: auto-detect)
+./install.sh --no-desktop  # skip the app launcher entry
 ./install.sh --uninstall   # uninstall (~/.config/pomo is kept)
 ```
 
@@ -48,6 +50,20 @@ Without `--force`, an existing `config.toml` is never touched. `style.css` is ba
 >
 > When uninstalling, remove those two lines manually the same way.
 
+### App launcher (rofi, app menus)
+
+The installer adds a `pomo.desktop` entry and its icon, so pomo shows up in rofi (`drun` mode),
+wofi, fuzzel or any app menu; search for "pomo", "pomodoro", "timer" or "stopwatch".
+
+The entry opens pomo in a terminal picked at install time: `$TERMINAL` if set, otherwise the
+first of kitty, foot, alacritty, wezterm or ghostty (override with `--terminal`). The window class
+is `pomo`, so you can style it in your compositor, e.g. on Hyprland:
+
+```
+windowrulev2 = float, class:^(pomo)$
+windowrulev2 = size 900 500, class:^(pomo)$
+```
+
 ### Manual installation
 
 | Project file                         | Destination                                      |
@@ -58,6 +74,8 @@ Without `--force`, an existing `config.toml` is never touched. `style.css` is ba
 | `waybar/scripts/pomo.py`             | `~/.config/waybar/scripts/pomo.py`               |
 | `waybar/modules/custom-pomo.jsonc`   | `~/.config/waybar/modules/custom-pomo.jsonc`     |
 | `waybar/pomo.css`                    | append to `~/.config/waybar/style.css`           |
+| `share/pomo.svg`                     | `~/.local/share/icons/hicolor/scalable/apps/pomo.svg` |
+| `share/pomo.desktop`                 | `~/.local/share/applications/pomo.desktop`, with `@EXEC@` replaced by e.g. `kitty --class pomo -e ~/.local/bin/pomo` |
 
 Then do the manual bar config step described above.
 
