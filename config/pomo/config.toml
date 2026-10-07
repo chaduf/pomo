@@ -15,10 +15,10 @@
 # Hooks: shell commands run when a work period starts / ends
 # (in [hooks] for every profile, or inside a profile to override):
 #   on_work_start  work starts, and timer resumes during work
-#                  (default: "playerctl -a -p mpv play")
+#                  (default: "pomo-media resume")
 #   on_work_end    work ends, timer paused during work, or pomo quit / profile or
 #                  mode switched during work
-#                  (default: "playerctl -a -p mpv pause")
+#                  (default: "pomo-media pause")
 #   "" = do nothing.
 #
 # Environment variables available to hooks:
@@ -34,8 +34,10 @@ default_profile = "classic"
 language = "auto"
 
 [hooks]
-on_work_start = "playerctl -a -p mpv play"
-on_work_end = "playerctl -a -p mpv pause"
+# pomo-media pauses the MPRIS players that are playing (mpv, browsers, Spotify...)
+# and resumes only those; restrict it with e.g. "pomo-media pause mpv,chromium"
+on_work_start = "pomo-media resume"
+on_work_end = "pomo-media pause"
 
 [profiles.classic]
 work = 25

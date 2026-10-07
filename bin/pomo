@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 """pomo — Pomodoro TUI that runs commands when work periods start and end
-(default: play/pause mpv through playerctl), sends desktop notifications and
+(default: pause/resume the media players that are playing, through pomo-media),
+sends desktop notifications and
 exposes its state to waybar. Also has a stopwatch mode with laps.
 
 Config:  ~/.config/pomo/config.toml  (pomo -L to list profiles, pomo -p NAME)
@@ -79,8 +80,8 @@ TRANSLATIONS = {
             "travail {work} min · pause {short} min · pause longue {long} min · {cycles} répétitions",
         "start: {start}  ·  end: {end}": "début : {start}  ·  fin : {end}",
         "(nothing)": "(rien)",
-        "Pomodoro TUI: runs commands when work starts/ends (mpv by default)":
-            "Pomodoro TUI : lance des commandes au début/à la fin du travail (mpv par défaut)",
+        "Pomodoro TUI: runs commands when work starts/ends (pauses/resumes media by default)":
+            "Pomodoro TUI : lance des commandes au début/à la fin du travail (pause/reprise de la musique par défaut)",
         "Config: {file}. Precedence: defaults < [hooks] < profile < CLI options. "
         "Hooks receive POMO_EVENT (start|resume|end|pause|quit|switch), POMO_PROFILE, "
         "POMO_DONE, POMO_CYCLES, POMO_WORK_MIN.":
@@ -512,8 +513,8 @@ class ProfileMenu(ModalScreen[str | None]):
 # ---------------------------------------------------------------- config
 DEFAULTS = {
     "work": 25, "short_break": 5, "long_break": 15, "cycles": 4,
-    "on_work_start": "playerctl -a -p mpv play",
-    "on_work_end": "playerctl -a -p mpv pause",
+    "on_work_start": "pomo-media resume",
+    "on_work_end": "pomo-media pause",
 }
 INT_KEYS = ("work", "short_break", "long_break", "cycles")
 HOOK_KEYS = ("on_work_start", "on_work_end")
@@ -570,7 +571,7 @@ def positive_int(v: str) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        description=_("Pomodoro TUI: runs commands when work starts/ends (mpv by default)"),
+        description=_("Pomodoro TUI: runs commands when work starts/ends (pauses/resumes media by default)"),
         epilog=_("Config: {file}. Precedence: defaults < [hooks] < profile < CLI options. "
                  "Hooks receive POMO_EVENT (start|resume|end|pause|quit|switch), POMO_PROFILE, "
                  "POMO_DONE, POMO_CYCLES, POMO_WORK_MIN.", file=CONFIG_FILE),

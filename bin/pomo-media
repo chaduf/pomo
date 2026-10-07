@@ -1,0 +1,43 @@
+#!/bin/sh
+# pomo-media — pause the MPRIS media players that are playing, and later resume
+# only the ones it paused (a player you stopped yourself is never restarted).
+#
+# Usage: pomo-media pause  [PLAYERS]
+#        pomo-media resume [PLAYERS]
+#   PLAYERS  optional comma-separated player names to restrict to (e.g. mpv,chromium);
+#            default: every MPRIS player (see `playerctl -l`).
+set -u
+
+state="${XDG_RUNTIME_DIR:-/tmp}/pomo-media.paused"
+filter="${2:-}"
+
+# Serialize calls: pomo runs hooks asynchronously, a quick pause/resume must not race.
+exec 9>"$state.lock"
+flock 9
+
+selected() {  # selected PLAYER -> true if PLAYER matches the filter
+  [ -z "$filter" ] && return 0
+  case ",$filter," in *",${1%%.*},"*) return 0 ;; esac
+  return 1
+}
+
+case "${1:-}" in
+  pause)
+    playerctl -l 2>/dev/null | while read -r player; do
+      selected "$player" || continue
+      [ "$(playerctl -p "$player" status 2>/dev/null)" = Playing ] || continue
+      playerctl -p "$player" pause && echo "$player"
+    done >> "$state"  # append: keep players paused by an earlier call
+    ;;
+  resume)
+    [ -f "$state" ] || exit 0
+    remaining=$(sort -u "$state" | while read -r player; do
+      if selected "$player"; then playerctl -p "$player" play 2>/dev/null; else echo "$player"; fi
+    done)
+    if [ -n "$remaining" ]; then printf '%s\n' "$remaining" > "$state"; else rm -f "$state"; fi
+    ;;
+  *)
+    echo "usage: pomo-media pause|resume [PLAYERS]" >&2
+    exit 2
+    ;;
+esac

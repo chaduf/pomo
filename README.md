@@ -1,7 +1,8 @@
 # pomo
 
 Pomodoro TUI (Textual) that runs commands when work periods start and end
-(default: play/pause mpv through MPRIS), sends desktop notifications and shows up in waybar.
+(default: pause/resume whatever media player is playing, through MPRIS), sends desktop
+notifications and shows up in waybar.
 It also has a stopwatch mode with laps.
 
 ![Main view](docs/screenshots/main-view.png)
@@ -11,7 +12,8 @@ It also has a stopwatch mode with laps.
 > [Claude Code](https://claude.com/claude-code), following the author's requirements and
 > direction. Review it as you would any other third-party code before relying on it.
 
-Dependencies: `python-textual`, `libnotify`, `waybar`; for the default hooks: `mpv`, `mpv-mpris`, `playerctl`.
+Dependencies: `python-textual`, `libnotify`, `playerctl`, `waybar`. To control mpv, it needs
+`mpv-mpris` (browsers, Spotify and most players expose MPRIS natively).
 
 ## Installation
 
@@ -51,6 +53,7 @@ Without `--force`, an existing `config.toml` is never touched. `style.css` is ba
 | Project file                         | Destination                                      |
 |--------------------------------------|--------------------------------------------------|
 | `bin/pomo`                           | `~/.local/bin/pomo`                              |
+| `bin/pomo-media`                     | `~/.local/bin/pomo-media`                        |
 | `config/pomo/config.toml`            | `~/.config/pomo/config.toml`                     |
 | `waybar/scripts/pomo.py`             | `~/.config/waybar/scripts/pomo.py`               |
 | `waybar/modules/custom-pomo.jsonc`   | `~/.config/waybar/modules/custom-pomo.jsonc`     |
@@ -111,8 +114,8 @@ default_profile = "classic"
 language = "auto"                 # auto | en | fr
 
 [hooks]                           # applies to every profile
-on_work_start = "playerctl -a -p mpv play"
-on_work_end = "playerctl -a -p mpv pause"
+on_work_start = "pomo-media resume"
+on_work_end = "pomo-media pause"
 
 [profiles.classic]
 work = 25                         # minutes
@@ -134,8 +137,8 @@ on_work_end = '[ "$POMO_EVENT" = pause ] || echo "end $POMO_PROFILE" >> ~/.local
 | `short_break`   | `-s, --short-break` | `5`  |
 | `long_break`    | `-l, --long-break`  | `15` |
 | `cycles`        | `-c, --cycles`      | `4`  |
-| `on_work_start` | `--on-work-start`   | `playerctl -a -p mpv play`  |
-| `on_work_end`   | `--on-work-end`     | `playerctl -a -p mpv pause` |
+| `on_work_start` | `--on-work-start`   | `pomo-media resume` |
+| `on_work_end`   | `--on-work-end`     | `pomo-media pause`  |
 | `language`      | `--lang`            | `auto` |
 
 Precedence: defaults < `[hooks]` < profile < CLI options. An empty string `""` disables a hook.
@@ -150,6 +153,19 @@ Precedence: defaults < `[hooks]` < profile < CLI options. An empty string `""` d
 Environment variables passed to hooks:
 `POMO_EVENT` (`start`/`resume` for the start hook, `end`/`pause`/`quit`/`switch` for the end hook),
 `POMO_PROFILE`, `POMO_DONE` (completed pomodoros), `POMO_CYCLES`, `POMO_WORK_MIN`.
+
+### Media control (`pomo-media`)
+
+The default hooks call `pomo-media`, a small helper installed next to `pomo`:
+
+```bash
+pomo-media pause            # pause every MPRIS player that is playing, remember which ones
+pomo-media resume           # resume only the players it paused
+pomo-media pause mpv,chromium   # restrict to some players (names as in `playerctl -l`)
+```
+
+A player you paused yourself is never restarted, and music you start during a break keeps
+playing. Run `playerctl -l` to see which players are visible; mpv only shows up with `mpv-mpris`.
 
 ## Localization
 

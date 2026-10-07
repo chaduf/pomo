@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pomo installer (Pomodoro TUI + mpv + notifications + waybar)
+# pomo installer (Pomodoro TUI + media control + notifications + waybar)
 #
 #   ./install.sh               install (copy files)
 #   ./install.sh --link        install as symlinks to this directory
@@ -16,7 +16,7 @@ BIN_DIR="$HOME/.local/bin"
 CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
 POMO_CONF="$CONF_DIR/pomo"
 WAYBAR="$CONF_DIR/waybar"
-DEPS=(python python-textual mpv mpv-mpris playerctl libnotify)
+DEPS=(python python-textual playerctl libnotify)
 
 MODE=copy WITH_WAYBAR=1 UNINSTALL=0 FORCE=0
 while (($#)); do
@@ -65,7 +65,7 @@ reload_waybar() {
 
 # ---------------------------------------------------------------- uninstall
 if ((UNINSTALL)); then
-  rm -fv "$BIN_DIR/pomo" "$WAYBAR/scripts/pomo.py" "$WAYBAR/modules/custom-pomo.jsonc"
+  rm -fv "$BIN_DIR/pomo" "$BIN_DIR/pomo-media" "$WAYBAR/scripts/pomo.py" "$WAYBAR/modules/custom-pomo.jsonc"
   if [[ -f "$WAYBAR/style.css" ]] && grep -q '/\* ---- pomo (pomodoro) ---- \*/' "$WAYBAR/style.css"; then
     cp "$WAYBAR/style.css" "$WAYBAR/style.css.bak-pomo"
     remove_css "$WAYBAR/style.css"
@@ -98,6 +98,7 @@ fi
 # ---------------------------------------------------------------- files
 echo "== Files ($MODE)"
 install_file "$SRC/bin/pomo" "$BIN_DIR/pomo" 755
+install_file "$SRC/bin/pomo-media" "$BIN_DIR/pomo-media" 755
 if [[ -e "$POMO_CONF/config.toml" ]] && ((!FORCE)); then
   ok "$POMO_CONF/config.toml already exists, kept"
   grep -qE '^\s*(\[profils|defaut\s*=|\[commandes)' "$POMO_CONF/config.toml" \
