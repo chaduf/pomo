@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Installation de pomo (TUI Pomodoro + mpv + notifications + waybar)
+# pomo installer (Pomodoro TUI + mpv + notifications + waybar)
 #
-#   ./install.sh               installe (copie les fichiers)
-#   ./install.sh --link        installe via liens symboliques vers ce dossier
-#   ./install.sh --no-waybar   n'installe pas l'intégration waybar
-#   ./install.sh --force       écrase aussi config.toml et le style waybar existants
-#   ./install.sh --uninstall   désinstalle (la config ~/.config/pomo est conservée)
+#   ./install.sh               install (copy files)
+#   ./install.sh --link        install as symlinks to this directory
+#   ./install.sh --no-waybar   skip the waybar integration
+#   ./install.sh --force       also overwrite an existing config.toml and waybar style
+#   ./install.sh --uninstall   uninstall (~/.config/pomo is kept)
 #
-# La config de barre waybar (ex. bars/top-bar.jsonc) n'est JAMAIS modifiée :
-# l'ajout du module "custom/pomo" se fait à la main (voir README).
+# The waybar bar config (e.g. bars/top-bar.jsonc) is NEVER modified:
+# adding the "custom/pomo" module is a manual step (see README).
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,7 +26,7 @@ while (($#)); do
     --uninstall) UNINSTALL=1 ;;
     --force) FORCE=1 ;;
     -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "Option inconnue : $1" >&2; exit 1 ;;
+    *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
   shift
 done
@@ -42,7 +42,7 @@ install_file() {  # install_file SOURCE DEST MODE
   ok "$2"
 }
 
-remove_css() {  # retire le bloc pomo de style.css
+remove_css() {  # remove the pomo block from style.css
   python3 - "$1" <<'EOF'
 import re, sys
 p = sys.argv[1]; s = open(p).read()
@@ -52,61 +52,63 @@ EOF
 }
 
 bar_reminder() {
-  warn "Étape manuelle : $1 dans ta config de barre waybar (ex. $WAYBAR/bars/top-bar.jsonc) :"
-  echo "    - \"~/.config/waybar/modules/custom-pomo.jsonc\" dans \"include\""
-  echo "    - \"custom/pomo\" dans \"modules-left\", \"modules-center\" ou \"modules-right\""
+  warn "Manual step: $1 your waybar bar config (e.g. $WAYBAR/bars/top-bar.jsonc):"
+  echo "    - \"~/.config/waybar/modules/custom-pomo.jsonc\" in \"include\""
+  echo "    - \"custom/pomo\" in \"modules-left\", \"modules-center\" or \"modules-right\""
 }
 
 reload_waybar() {
   if pgrep -x waybar >/dev/null; then
-    pkill -SIGUSR2 -x waybar && ok "waybar rechargée"
+    pkill -SIGUSR2 -x waybar && ok "waybar reloaded"
   fi
 }
 
-# ---------------------------------------------------------------- désinstallation
+# ---------------------------------------------------------------- uninstall
 if ((UNINSTALL)); then
   rm -fv "$BIN_DIR/pomo" "$WAYBAR/scripts/pomo.py" "$WAYBAR/modules/custom-pomo.jsonc"
   if [[ -f "$WAYBAR/style.css" ]] && grep -q '/\* ---- pomo (pomodoro) ---- \*/' "$WAYBAR/style.css"; then
     cp "$WAYBAR/style.css" "$WAYBAR/style.css.bak-pomo"
     remove_css "$WAYBAR/style.css"
-    ok "style retiré de $WAYBAR/style.css"
+    ok "style removed from $WAYBAR/style.css"
   fi
   reload_waybar
-  bar_reminder "retire"
-  warn "config conservée : $POMO_CONF (supprime-la à la main si besoin)"
+  bar_reminder "remove these from"
+  warn "config kept: $POMO_CONF (delete it manually if needed)"
   exit 0
 fi
 
-# ---------------------------------------------------------------- dépendances
-echo "== Dépendances"
+# ---------------------------------------------------------------- dependencies
+echo "== Dependencies"
 if command -v pacman >/dev/null; then
   missing=()
   for p in "${DEPS[@]}"; do pacman -Qq "$p" &>/dev/null || missing+=("$p"); done
   ((WITH_WAYBAR)) && ! pacman -Qq waybar &>/dev/null && missing+=(waybar)
   if ((${#missing[@]})); then
-    warn "manquant : ${missing[*]}"
-    read -rp "Installer avec pacman ? [O/n] " r
+    warn "missing: ${missing[*]}"
+    read -rp "Install with pacman? [Y/n] " r
     if [[ ! "$r" =~ ^[nN] ]]; then sudo pacman -S --needed "${missing[@]}"
-    else warn "dépendances non installées, pomo risque de ne pas fonctionner"; fi
+    else warn "dependencies not installed, pomo may not work"; fi
   else
-    ok "toutes présentes"
+    ok "all present"
   fi
 else
-  warn "pacman introuvable : vérifie à la main ${DEPS[*]}"
+  warn "pacman not found: check ${DEPS[*]} manually"
 fi
 
-# ---------------------------------------------------------------- fichiers
-echo "== Fichiers ($MODE)"
+# ---------------------------------------------------------------- files
+echo "== Files ($MODE)"
 install_file "$SRC/bin/pomo" "$BIN_DIR/pomo" 755
 if [[ -e "$POMO_CONF/config.toml" ]] && ((!FORCE)); then
-  ok "$POMO_CONF/config.toml existe déjà, conservé"
+  ok "$POMO_CONF/config.toml already exists, kept"
+  grep -qE '^\s*(\[profils|defaut\s*=|\[commandes)' "$POMO_CONF/config.toml" \
+    && warn "it uses the old French keys and will be rejected: migrate it or rerun with --force"
 else
   [[ -e "$POMO_CONF/config.toml" && ! -L "$POMO_CONF/config.toml" ]] \
     && cp "$POMO_CONF/config.toml" "$POMO_CONF/config.toml.bak-pomo" \
-    && warn "ancienne config sauvegardée : $POMO_CONF/config.toml.bak-pomo"
+    && warn "previous config backed up: $POMO_CONF/config.toml.bak-pomo"
   install_file "$SRC/config/pomo/config.toml" "$POMO_CONF/config.toml" 644
 fi
-[[ ":$PATH:" == *":$BIN_DIR:"* ]] || warn "$BIN_DIR n'est pas dans ton PATH"
+[[ ":$PATH:" == *":$BIN_DIR:"* ]] || warn "$BIN_DIR is not in your PATH"
 
 # ---------------------------------------------------------------- waybar
 if ((WITH_WAYBAR)); then
@@ -116,21 +118,21 @@ if ((WITH_WAYBAR)); then
 
   css="$WAYBAR/style.css"
   if [[ ! -f "$css" ]]; then
-    warn "$css introuvable : ajoute le contenu de waybar/pomo.css à ton style"
+    warn "$css not found: add the content of waybar/pomo.css to your style"
   elif grep -q '#custom-pomo' "$css" && ((!FORCE)); then
-    ok "style déjà présent dans $css"
+    ok "style already present in $css"
   else
     cp "$css" "$css.bak-pomo"
     grep -q '/\* ---- pomo (pomodoro) ---- \*/' "$css" && remove_css "$css"
     { echo; cat "$SRC/waybar/pomo.css"; } >> "$css"
-    ok "style ajouté à $css"
+    ok "style added to $css"
     grep -q '@define-color \(red\|green\|lavender\)\b' "$WAYBAR"/*.css 2>/dev/null \
-      || warn "pomo.css utilise @red/@green/@lavender : adapte les couleurs si ton thème ne les définit pas"
+      || warn "pomo.css uses @red/@green/@lavender: adjust the colors if your theme does not define them"
   fi
   reload_waybar
   echo
-  bar_reminder "ajoute (si ce n'est pas déjà fait)"
+  bar_reminder "add these to (if not done yet)"
 fi
 
 echo
-ok "Installation terminée. Lance : pomo   (pomo -h pour l'aide, pomo -L pour les profils)"
+ok "Installation complete. Run: pomo   (pomo -h for help, pomo -L to list profiles)"

@@ -1,60 +1,63 @@
-# Configuration de pomo — profils Pomodoro
+# pomo configuration — Pomodoro profiles
 #
-# Utilisation :  pomo               -> profil « defaut » ci-dessous
-#                pomo -p deep       -> profil « deep »
-#                pomo -p deep -w 60 -> profil « deep », mais 60 min de travail
-#                pomo -L            -> liste des profils
-#                pomo --debut-travail "CMD" --fin-travail "CMD"  -> commandes ponctuelles
+# Usage:  pomo                    -> profile named by default_profile below
+#         pomo -p deep            -> profile "deep"
+#         pomo -p deep -w 60      -> profile "deep", but 60 min of work
+#         pomo -L                 -> list profiles
+#         pomo --on-work-start "CMD" --on-work-end "CMD"  -> one-off hooks
 #
-# Clés d'un profil (en minutes, entiers > 0) :
-#   travail      durée d'une session de travail        (défaut : 25)
-#   pause        durée de la pause courte               (défaut : 5)
-#   repetitions  nb de sessions avant la pause longue   (défaut : 4)
-#   pause_longue durée de la pause longue (optionnel)   (défaut : 15)
+# Profile keys (minutes, integers > 0):
+#   work         length of a work session                (default: 25)
+#   short_break  length of the short break                (default: 5)
+#   cycles       work sessions before the long break      (default: 4)
+#   long_break   length of the long break (optional)      (default: 15)
 #
-# Commandes shell lancées au début / à la fin d'une période de travail
-# (dans [commandes] pour tous les profils, ou dans un profil pour le surcharger) :
-#   debut_travail  début du travail, et reprise après une pause du minuteur
-#                  (défaut : "playerctl -a -p mpv play")
-#   fin_travail    fin du travail, pause du minuteur, ou sortie de pomo pendant le travail
-#                  (défaut : "playerctl -a -p mpv pause")
-#   "" = ne rien faire.
+# Hooks: shell commands run when a work period starts / ends
+# (in [hooks] for every profile, or inside a profile to override):
+#   on_work_start  work starts, and timer resumes during work
+#                  (default: "playerctl -a -p mpv play")
+#   on_work_end    work ends, timer paused during work, or pomo quit during work
+#                  (default: "playerctl -a -p mpv pause")
+#   "" = do nothing.
 #
-# Variables d'environnement disponibles dans les commandes :
-#   POMO_EVENT     start | resume (début)  ·  end | pause | quit (fin)
-#   POMO_PROFILE   nom du profil
-#   POMO_DONE      nb de pomodoros terminés
-#   POMO_CYCLES    répétitions avant la pause longue
-#   POMO_WORK_MIN  durée du travail en minutes
+# Environment variables available to hooks:
+#   POMO_EVENT     start | resume (start hook)  ·  end | pause | quit (end hook)
+#   POMO_PROFILE   profile name
+#   POMO_DONE      number of completed pomodoros
+#   POMO_CYCLES    work sessions before the long break
+#   POMO_WORK_MIN  work length in minutes
 
-defaut = "classique"
+default_profile = "classic"
 
-[commandes]
-debut_travail = "playerctl -a -p mpv play"
-fin_travail = "playerctl -a -p mpv pause"
+# UI language: "auto" (system locale), "en" or "fr"
+language = "auto"
 
-[profils.classique]
-travail = 25
-pause = 5
-repetitions = 4
-pause_longue = 15
+[hooks]
+on_work_start = "playerctl -a -p mpv play"
+on_work_end = "playerctl -a -p mpv pause"
 
-[profils.deep]
-travail = 50
-pause = 10
-repetitions = 3
-pause_longue = 30
+[profiles.classic]
+work = 25
+short_break = 5
+cycles = 4
+long_break = 15
 
-[profils.court]
-travail = 15
-pause = 3
-repetitions = 4
+[profiles.deep]
+work = 50
+short_break = 10
+cycles = 3
+long_break = 30
 
-# Exemple : sans musique, mais on note chaque fin de session dans un journal
-# (sauf quand on met juste le minuteur en pause)
-[profils.silence]
-travail = 25
-pause = 5
-repetitions = 4
-debut_travail = ""
-fin_travail = '[ "$POMO_EVENT" = pause ] || echo "$(date "+%F %T") fin ($POMO_EVENT) - $POMO_PROFILE" >> ~/.local/state/pomo.log'
+[profiles.short]
+work = 15
+short_break = 3
+cycles = 4
+
+# Example: no music, but log each finished session
+# (except when the timer is merely paused)
+[profiles.silent]
+work = 25
+short_break = 5
+cycles = 4
+on_work_start = ""
+on_work_end = '[ "$POMO_EVENT" = pause ] || echo "$(date "+%F %T") end ($POMO_EVENT) - $POMO_PROFILE" >> ~/.local/state/pomo.log'

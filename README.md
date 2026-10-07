@@ -1,94 +1,124 @@
 # pomo
 
-Pomodoro TUI (Textual) qui lance des commandes au début et à la fin des périodes de travail
-(par défaut : play/pause de mpv via MPRIS), envoie des notifications et s'affiche dans waybar.
+Pomodoro TUI (Textual) that runs commands when work periods start and end
+(default: play/pause mpv through MPRIS), sends desktop notifications and shows up in waybar.
 
-Dépendances : `python-textual`, `libnotify`, `waybar` ; pour les commandes par défaut : `mpv`, `mpv-mpris`, `playerctl`.
+Dependencies: `python-textual`, `libnotify`, `waybar`; for the default hooks: `mpv`, `mpv-mpris`, `playerctl`.
 
 ## Installation
 
 ```bash
-./install.sh               # installe (propose d'installer les dépendances manquantes via pacman)
-./install.sh --link        # liens symboliques vers ce dossier (les modifs ici sont prises en compte)
-./install.sh --no-waybar   # sans l'intégration waybar
-./install.sh --force       # écrase aussi config.toml et le style waybar en place
-./install.sh --uninstall   # désinstaller (~/.config/pomo est conservé)
+./install.sh               # install (offers to install missing dependencies with pacman)
+./install.sh --link        # symlinks to this directory (edits here take effect immediately)
+./install.sh --no-waybar   # skip the waybar integration
+./install.sh --force       # also overwrite an existing config.toml and waybar style
+./install.sh --uninstall   # uninstall (~/.config/pomo is kept)
 ```
 
-Sans `--force`, le script ne touche pas à un `config.toml` existant. Il sauvegarde `style.css`
-en `*.bak-pomo` avant de le modifier et peut être relancé sans risque de doublon.
+Without `--force`, an existing `config.toml` is never touched. `style.css` is backed up as
+`*.bak-pomo` before being modified, and the script can be rerun safely without creating duplicates.
 
-> **⚠ Étape manuelle obligatoire : la config de la barre waybar.**
-> Le script **ne modifie jamais** le fichier de barre waybar (`~/.config/waybar/bars/top-bar.jsonc`,
-> ou `~/.config/waybar/config.jsonc` selon ta config). Il installe le module, mais c'est à toi
-> de l'afficher dans la barre :
+> **⚠ Required manual step: the waybar bar config.**
+> The script **never modifies** the waybar bar file (`~/.config/waybar/bars/top-bar.jsonc`,
+> or `~/.config/waybar/config.jsonc` depending on your setup). It installs the module, but
+> adding it to the bar is up to you:
 >
-> 1. ajouter le module dans `include` :
+> 1. add the module to `include`:
 >    ```jsonc
 >    "include": [
 >      ...
 >      "~/.config/waybar/modules/custom-pomo.jsonc",
 >    ],
 >    ```
-> 2. placer `"custom/pomo"` où tu veux dans `modules-left`, `modules-center` ou `modules-right` :
+> 2. put `"custom/pomo"` wherever you like in `modules-left`, `modules-center` or `modules-right`:
 >    ```jsonc
 >    "modules-center": ["custom/music", "custom/pomo"],
 >    ```
-> 3. recharger waybar : `pkill -SIGUSR2 waybar`
+> 3. reload waybar: `pkill -SIGUSR2 waybar`
 >
-> À la désinstallation, retire ces deux lignes à la main de la même façon.
+> When uninstalling, remove those two lines manually the same way.
 
-### Installation manuelle
+### Manual installation
 
-| Fichier du projet                    | Emplacement                                      |
+| Project file                         | Destination                                      |
 |--------------------------------------|--------------------------------------------------|
 | `bin/pomo`                           | `~/.local/bin/pomo`                              |
 | `config/pomo/config.toml`            | `~/.config/pomo/config.toml`                     |
 | `waybar/scripts/pomo.py`             | `~/.config/waybar/scripts/pomo.py`               |
 | `waybar/modules/custom-pomo.jsonc`   | `~/.config/waybar/modules/custom-pomo.jsonc`     |
-| `waybar/pomo.css`                    | à ajouter à la fin de `~/.config/waybar/style.css` |
+| `waybar/pomo.css`                    | append to `~/.config/waybar/style.css`           |
 
-Puis faire l'étape manuelle de la config de barre décrite ci-dessus.
+Then do the manual bar config step described above.
 
-## Utilisation
+## Usage
 
 ```bash
-pomo                 # profil par défaut
-pomo -p deep         # profil « deep »
-pomo -w 40 -s 8 -c 2 # travail / pause / répétitions (priment sur le profil)
-pomo -L              # lister les profils
-pomo --debut-travail "CMD" --fin-travail "CMD"   # commandes ponctuelles
-pomo --no-hooks      # ne lancer aucune commande
+pomo                    # default profile
+pomo -p deep            # profile "deep"
+pomo -w 40 -s 8 -c 2    # work / short break / cycles (override the profile)
+pomo -L                 # list profiles
+pomo --on-work-start "CMD" --on-work-end "CMD"   # one-off hooks
+pomo --no-hooks         # run no hook at all
+pomo --lang en          # force the UI language
 ```
 
-## Commandes de début / fin de travail
+Keys: `space` pause/resume · `n` next phase · `r` reset · `q` quit.
+Waybar: click = pause/resume, right click = next phase.
 
-Deux commandes shell, configurables :
+## Configuration
 
-| Config (`config.toml`) | CLI               | Quand                                                        | Défaut                       |
-|------------------------|-------------------|--------------------------------------------------------------|------------------------------|
-| `debut_travail`        | `--debut-travail` | début d'une période de travail, reprise du minuteur          | `playerctl -a -p mpv play`   |
-| `fin_travail`          | `--fin-travail`   | fin du travail (naturelle ou `n`), pause du minuteur, `q`    | `playerctl -a -p mpv pause`  |
-
-Priorité : défauts < section `[commandes]` (tous les profils) < profil < options CLI.
-Une chaîne vide `""` désactive la commande.
+`~/.config/pomo/config.toml`:
 
 ```toml
-[commandes]                       # pour tous les profils
-debut_travail = "playerctl -a -p mpv play"
-fin_travail = "playerctl -a -p mpv pause"
+default_profile = "classic"
+language = "auto"                 # auto | en | fr
 
-[profils.silence]                 # surcharge pour un profil
-travail = 25
-pause = 5
-repetitions = 4
-debut_travail = ""
-fin_travail = '[ "$POMO_EVENT" = pause ] || echo "fin $POMO_PROFILE" >> ~/.local/state/pomo.log'
+[hooks]                           # applies to every profile
+on_work_start = "playerctl -a -p mpv play"
+on_work_end = "playerctl -a -p mpv pause"
+
+[profiles.classic]
+work = 25                         # minutes
+short_break = 5
+cycles = 4                        # work sessions before the long break
+long_break = 15                   # optional
+
+[profiles.silent]                 # per-profile hook override
+work = 25
+short_break = 5
+cycles = 4
+on_work_start = ""
+on_work_end = '[ "$POMO_EVENT" = pause ] || echo "end $POMO_PROFILE" >> ~/.local/state/pomo.log'
 ```
 
-Variables d'environnement transmises aux commandes :
-`POMO_EVENT` (`start`/`resume` au début, `end`/`pause`/`quit` à la fin), `POMO_PROFILE`,
-`POMO_DONE` (pomodoros terminés), `POMO_CYCLES`, `POMO_WORK_MIN`.
+| Config key      | CLI option          | Default |
+|-----------------|---------------------|---------|
+| `work`          | `-w, --work`        | `25` |
+| `short_break`   | `-s, --short-break` | `5`  |
+| `long_break`    | `-l, --long-break`  | `15` |
+| `cycles`        | `-c, --cycles`      | `4`  |
+| `on_work_start` | `--on-work-start`   | `playerctl -a -p mpv play`  |
+| `on_work_end`   | `--on-work-end`     | `playerctl -a -p mpv pause` |
+| `language`      | `--lang`            | `auto` |
 
-Touches : `espace` pause/reprise · `n` phase suivante · `r` reset · `q` quitter.
-Waybar : clic = pause/reprise, clic droit = phase suivante.
+Precedence: defaults < `[hooks]` < profile < CLI options. An empty string `""` disables a hook.
+
+### Hooks
+
+| Hook            | Runs when                                                                    |
+|-----------------|------------------------------------------------------------------------------|
+| `on_work_start` | a work period starts; the timer resumes during work                          |
+| `on_work_end`   | work ends (naturally or with `n`); timer paused during work; `q` during work |
+
+Environment variables passed to hooks:
+`POMO_EVENT` (`start`/`resume` for the start hook, `end`/`pause`/`quit` for the end hook),
+`POMO_PROFILE`, `POMO_DONE` (completed pomodoros), `POMO_CYCLES`, `POMO_WORK_MIN`.
+
+## Localization
+
+User-facing text (TUI, notifications, waybar tooltip, CLI help) is in English by default.
+The language is resolved from `--lang`, then `$POMO_LANG`, then `language` in the config,
+then the system locale (`LC_ALL`, `LC_MESSAGES`, `LANG`). Available: `en`, `fr`.
+
+To add a language, add an entry to `TRANSLATIONS` in `bin/pomo` and `waybar/scripts/pomo.py`
+(English strings are the keys).
