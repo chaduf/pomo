@@ -72,6 +72,10 @@ pomo --lang en          # force the UI language
 Keys: `space` pause/resume · `n` next phase · `r` reset · `p` switch profile · `q` quit.
 Waybar: click = pause/resume, right click = next phase.
 
+The waybar module shows the remaining time (here: work running, work paused, short break):
+
+![Waybar module](docs/screenshots/waybar-module.png)
+
 `p` opens a menu listing the profiles (the config file is reread, so profiles added while pomo
 runs show up). Move with `↑`/`↓` or `j`/`k`, press `Enter` to load the profile, `Esc` to cancel.
 Loading a profile resets the app as if it had just been launched with `-p NAME`: the timer and
