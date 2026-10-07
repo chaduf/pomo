@@ -3,6 +3,8 @@
 Pomodoro TUI (Textual) that runs commands when work periods start and end
 (default: play/pause mpv through MPRIS), sends desktop notifications and shows up in waybar.
 
+![Main view](docs/screenshots/main-view.png)
+
 > **AI disclosure:** this project was built with AI assistance. The code, scripts and
 > documentation were largely written by Claude (Anthropic) through
 > [Claude Code](https://claude.com/claude-code), following the author's requirements and
