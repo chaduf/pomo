@@ -75,7 +75,8 @@ Keys: `space` pause/resume · `n` next phase · `r` reset · `p` switch profile 
 `m` pomodoro/stopwatch mode · `l` lap (stopwatch) · `q` quit.
 Waybar: click = pause/resume, right click = next phase (or lap in stopwatch mode).
 
-The waybar module shows the remaining time (here: work running, work paused, short break):
+The waybar module shows the remaining time (here: work running, work paused, short break,
+stopwatch):
 
 ![Waybar module](docs/screenshots/waybar-module.png)
 
@@ -98,6 +99,8 @@ back to the pomodoro, which restarts fresh with the current profile.
 - The waybar module shows `⏱ MM:SS`; right click records a lap.
 - No hooks or notifications run in stopwatch mode. Switching modes during a work period runs
   `on_work_end` with `POMO_EVENT=switch`.
+
+![Stopwatch mode](docs/screenshots/stopwatch.png)
 
 ## Configuration
 
