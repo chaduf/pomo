@@ -98,7 +98,7 @@ pomo --stopwatch        # start in stopwatch mode
 |-------|-----------|---------------------------|--------------------------|
 | Timer | `space`   | start / pause / resume    | start / pause / resume   |
 | Timer | `n` / `l` | `n`: next phase           | `l`: record a lap        |
-| Timer | `r`       | reset the current phase   | reset the time and laps  |
+| Timer | `r`       | full reset (back to work, cycle and count at zero) | reset the time and laps |
 | App   | `p`       | switch profile            | —                        |
 | App   | `m`       | switch to the stopwatch   | switch to the pomodoro   |
 | App   | `q`       | quit                      | quit                     |
@@ -180,10 +180,10 @@ Precedence: defaults < `[hooks]` < profile < CLI options. An empty string `""` d
 | Hook            | Runs when                                                                    |
 |-----------------|------------------------------------------------------------------------------|
 | `on_work_start` | a work period starts; the timer resumes during work                          |
-| `on_work_end`   | work ends (naturally or with `n`); timer paused during work; `q`, profile or mode switch during work |
+| `on_work_end`   | work ends (naturally or with `n`); timer paused during work; `q`, reset, profile or mode switch during work |
 
 Environment variables passed to hooks:
-`POMO_EVENT` (`start`/`resume` for the start hook, `end`/`pause`/`quit`/`switch` for the end hook),
+`POMO_EVENT` (`start`/`resume` for the start hook, `end`/`pause`/`quit`/`switch`/`reset` for the end hook),
 `POMO_PROFILE`, `POMO_DONE` (completed pomodoros), `POMO_CYCLES`, `POMO_WORK_MIN`.
 
 Hooks run through `sh -c` with pomo's own directory prepended to `PATH`, so `pomo-media`

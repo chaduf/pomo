@@ -16,13 +16,13 @@
 # (in [hooks] for every profile, or inside a profile to override):
 #   on_work_start  work starts, and timer resumes during work
 #                  (default: "pomo-media resume")
-#   on_work_end    work ends, timer paused during work, or pomo quit / profile or
-#                  mode switched during work
+#   on_work_end    work ends, timer paused during work, or pomo quit / reset /
+#                  profile or mode switched during work
 #                  (default: "pomo-media pause")
 #   "" = do nothing.
 #
 # Environment variables available to hooks:
-#   POMO_EVENT     start | resume (start hook)  ·  end | pause | quit | switch (end hook)
+#   POMO_EVENT     start | resume (start hook)  ·  end | pause | quit | switch | reset (end hook)
 #   POMO_PROFILE   profile name
 #   POMO_DONE      number of completed pomodoros
 #   POMO_CYCLES    work sessions before the long break

@@ -86,10 +86,10 @@ TRANSLATIONS = {
         "Pomodoro TUI: runs commands when work starts/ends (pauses/resumes media by default)":
             "Pomodoro TUI : lance des commandes au début/à la fin du travail (pause/reprise de la musique par défaut)",
         "Config: {file}. Precedence: defaults < [hooks] < profile < CLI options. "
-        "Hooks receive POMO_EVENT (start|resume|end|pause|quit|switch), POMO_PROFILE, "
+        "Hooks receive POMO_EVENT (start|resume|end|pause|quit|switch|reset), POMO_PROFILE, "
         "POMO_DONE, POMO_CYCLES, POMO_WORK_MIN.":
             "Config : {file}. Priorité : défauts < [hooks] < profil < options CLI. "
-            "Les commandes reçoivent POMO_EVENT (start|resume|end|pause|quit|switch), POMO_PROFILE, "
+            "Les commandes reçoivent POMO_EVENT (start|resume|end|pause|quit|switch|reset), POMO_PROFILE, "
             "POMO_DONE, POMO_CYCLES, POMO_WORK_MIN.",
         "profile to use (default: default_profile from the config file)":
             "profil à utiliser (défaut : default_profile du fichier de config)",
@@ -350,7 +350,10 @@ class Pomo(App):
             self.reset_stopwatch()
             self.render_laps()
         else:
-            self.remaining = float(self.durations[self.phase])
+            # full reset, as if freshly launched: back to work, cycle and count at zero
+            if self.phase == WORK and self.running:
+                self.hook("end", "reset")
+            self.load_profile(self.settings, self.profile)
         self.render_state()
 
     def action_mode(self) -> None:
@@ -397,7 +400,7 @@ class Pomo(App):
         self.exit()
 
     def hook(self, which: str, event: str) -> None:
-        """which: start|end; event: start|resume (start) or end|pause|quit|switch (end)."""
+        """which: start|end; event: start|resume (start) or end|pause|quit|switch|reset (end)."""
         run_hook(self.hooks.get(which, ""), {
             "POMO_EVENT": event, "POMO_PROFILE": self.profile or "",
             "POMO_DONE": str(self.done_pomodoros), "POMO_CYCLES": str(self.cycles),
@@ -621,7 +624,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description=_("Pomodoro TUI: runs commands when work starts/ends (pauses/resumes media by default)"),
         epilog=_("Config: {file}. Precedence: defaults < [hooks] < profile < CLI options. "
-                 "Hooks receive POMO_EVENT (start|resume|end|pause|quit|switch), POMO_PROFILE, "
+                 "Hooks receive POMO_EVENT (start|resume|end|pause|quit|switch|reset), POMO_PROFILE, "
                  "POMO_DONE, POMO_CYCLES, POMO_WORK_MIN.", file=CONFIG_FILE),
     )
     ap.add_argument("-p", "--profile", help=_("profile to use (default: default_profile from the config file)"))
