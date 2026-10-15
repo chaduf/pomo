@@ -100,6 +100,7 @@ pomo --export-ics       # export logged work sessions to pomo-sessions.ics
 | Timer | `space`   | start / pause / resume    | start / pause / resume   |
 | Timer | `n` / `l` | `n`: next phase           | `l`: record a lap        |
 | Timer | `+`       | extend the current phase (work or break) by 5 min | — |
+| Timer | `-`       | shorten the current phase by 5 min; with 5 min or less left, end it (like `n`) | — |
 | Timer | `r`       | full reset (back to work, cycle and count at zero) | reset the time and laps |
 | App   | `p`       | switch profile            | —                        |
 | App   | `m`       | switch to the stopwatch   | switch to the pomodoro   |

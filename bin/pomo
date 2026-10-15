@@ -6,7 +6,8 @@ exposes its state to waybar. Also has a stopwatch mode with laps.
 
 Config:  ~/.config/pomo/config.toml  (pomo -L to list profiles, pomo -p NAME)
 Hooks:   on_work_start / on_work_end (config) or --on-work-start / --on-work-end (CLI)
-Keys:    space = pause/resume, n = next phase, + = extend the phase by 5 min, r = reset,
+Keys:    space = pause/resume, n = next phase, + / - = add / remove 5 min to the phase
+         (- ends the phase when 5 min or less remain), r = reset,
          p = switch profile,
          m = pomodoro/stopwatch mode, l = lap (stopwatch), q = quit
 Signals: SIGUSR1 = pause/resume, SIGUSR2 = next phase or lap (used by waybar)
@@ -46,7 +47,7 @@ SESSIONS_FILE = DATA_DIR / "sessions.jsonl"
 MIN_ENTRY_SECONDS = 5 * 60  # work time entries shorter than this are not recorded
 SNAPSHOT_EVERY = 30         # seconds between saves of the unrecorded work (crash recovery)
 WAYBAR_SIGNAL = 9  # must match "signal" in the waybar module
-EXTEND_MINUTES = 5  # added to the current pomodoro phase by the + key
+EXTEND_MINUTES = 5  # added to / removed from the current pomodoro phase by the + / - keys
 
 POMODORO, STOPWATCH = "pomodoro", "stopwatch"
 WORK, SHORT, LONG = "work", "short", "long"
@@ -62,6 +63,7 @@ TRANSLATIONS = {
         " (paused)": " (en pause)",
         "Next phase": "Phase suivante",
         "{phase}: +{minutes} min": "{phase} : +{minutes} min",
+        "{phase}: -{minutes} min": "{phase} : -{minutes} min",
         "Reset": "Réinitialiser",
         "Start": "Démarrer",
         "Pause": "Pause",
@@ -454,7 +456,9 @@ class Pomo(App):
     def on_mount(self) -> None:
         self.title = "pomo"
         self.main_screen = self.screen  # the profile menu is pushed on top of it
-        for key, action in (("space", "toggle"), ("n", "skip"), ("plus,add", "extend"), ("l", "lap"), ("r", "reset"),
+        # add / subtract are the keypad + / -
+        for key, action in (("space", "toggle"), ("n", "skip"), ("plus,add", "extend"),
+                            ("minus,subtract", "shorten"), ("l", "lap"), ("r", "reset"),
                             ("p", "profiles"), ("m", "mode"), ("q", "quit")):
             self.bind(key, action, show=False)  # labels are rendered by render_hints()
         loop = asyncio.get_running_loop()
@@ -471,7 +475,7 @@ class Pomo(App):
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Hide the bindings that do not apply to the current mode."""
-        if action in ("skip", "extend", "profiles"):
+        if action in ("skip", "extend", "shorten", "profiles"):
             return self.mode == POMODORO
         if action == "lap":
             return self.mode == STOPWATCH
@@ -625,6 +629,18 @@ class Pomo(App):
             self.notify(_("{phase}: +{minutes} min", phase=phase_label(self.phase),
                           minutes=EXTEND_MINUTES))
 
+    def action_shorten(self) -> None:
+        """Remove 5 min from the current phase; with 5 min or less left, end it like n."""
+        if self.mode != POMODORO:
+            return
+        if self.remaining <= EXTEND_MINUTES * 60:
+            self.next_phase()
+            return
+        self.remaining -= EXTEND_MINUTES * 60
+        self.phase_total -= EXTEND_MINUTES * 60
+        self.render_state()
+        self.notify(_("{phase}: -{minutes} min", phase=phase_label(self.phase), minutes=EXTEND_MINUTES))
+
     def action_lap(self) -> None:
         if self.mode == STOPWATCH and self.running:
             self.laps.append(self.elapsed)
@@ -730,6 +746,7 @@ class Pomo(App):
         timer = [("space", "toggle", toggle),
                  ("l", "lap", _("Lap")) if stopwatch else ("n", "skip", _("Next phase")),
                  ("+", "extend", f"{EXTEND_MINUTES} min"),
+                 ("-", "shorten", f"{EXTEND_MINUTES} min"),
                  ("r", "reset", _("Reset"))]
         app = [("p", "profiles", _("Profiles")),
                ("m", "mode", _("Pomodoro") if stopwatch else _("Stopwatch")),
