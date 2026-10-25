@@ -8,7 +8,7 @@ Config:  ~/.config/pomo/config.toml  (pomo -L to list profiles, pomo -p NAME)
 Hooks:   on_work_start / on_work_end (config) or --on-work-start / --on-work-end (CLI)
 Keys:    space = pause/resume, n = next phase, + / - = add / remove 5 min to the phase
          (- ends the phase when 5 min or less remain), r = reset,
-         p = switch profile,
+         p = switch profile, h = enable / disable the hooks,
          m = pomodoro/stopwatch mode, l = lap (stopwatch), q = quit
 Signals: SIGUSR1 = pause/resume, SIGUSR2 = next phase or lap (used by waybar)
 UI language: --lang, $POMO_LANG, `language` in config, then the system locale.
@@ -117,7 +117,13 @@ TRANSLATIONS = {
         "work sessions before the long break ({default})": "répétitions avant la pause longue ({default})",
         "command run when work starts (\"{default}\")": "commande au début du travail (« {default} »)",
         "command run when work ends (\"{default}\")": "commande à la fin du travail (« {default} »)",
-        "do not run any hook": "ne lancer aucune commande",
+        "start with the hooks disabled (h toggles them in the app)":
+            "démarrer avec les commandes désactivées (h les réactive dans l'application)",
+        "Disable hooks": "Désactiver les commandes",
+        "Enable hooks": "Activer les commandes",
+        "Hooks disabled": "Commandes désactivées",
+        "Hooks enabled": "Commandes activées",
+        "  ·  hooks off": "  ·  commandes désactivées",
         "UI language: {langs} (default: auto)": "langue de l'interface : {langs} (défaut : auto)",
         "Profiles": "Profils",
         "Cycle complete: record your work": "Cycle terminé : enregistre ton travail",
@@ -407,7 +413,7 @@ class Pomo(App):
 
     def __init__(self, settings: dict, profile: str | None, no_hooks: bool, mode: str = POMODORO) -> None:
         super().__init__()
-        self.no_hooks = no_hooks
+        self.hooks_enabled = not no_hooks  # toggled with h, kept across resets and switches
         self.mode = mode
         self.segment: dict | None = None  # the stretch of work in progress
         self.cycle: list[dict] = []        # finished segments of the current cycle
@@ -422,7 +428,7 @@ class Pomo(App):
         self.durations = {WORK: settings["work"] * 60, SHORT: settings["short_break"] * 60,
                           LONG: settings["long_break"] * 60}
         self.cycles = settings["cycles"]
-        self.hooks = {} if self.no_hooks else {"start": settings["on_work_start"], "end": settings["on_work_end"]}
+        self.hooks = {"start": settings["on_work_start"], "end": settings["on_work_end"]}
         self.profile = profile
         self.phase = WORK
         self.done_pomodoros = 0
@@ -459,7 +465,7 @@ class Pomo(App):
         # add / subtract are the keypad + / -
         for key, action in (("space", "toggle"), ("n", "skip"), ("plus,add", "extend"),
                             ("minus,subtract", "shorten"), ("l", "lap"), ("r", "reset"),
-                            ("p", "profiles"), ("m", "mode"), ("q", "quit")):
+                            ("p", "profiles"), ("m", "mode"), ("h", "hooks"), ("q", "quit")):
             self.bind(key, action, show=False)  # labels are rendered by render_hints()
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGUSR1, self.action_toggle)
@@ -475,7 +481,7 @@ class Pomo(App):
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Hide the bindings that do not apply to the current mode."""
-        if action in ("skip", "extend", "shorten", "profiles"):
+        if action in ("skip", "extend", "shorten", "profiles", "hooks"):
             return self.mode == POMODORO
         if action == "lap":
             return self.mode == STOPWATCH
@@ -728,8 +734,16 @@ class Pomo(App):
         refresh_waybar()
         self.exit()
 
+    def action_hooks(self) -> None:
+        """Enable / disable the work start / end hooks; takes effect from the next event."""
+        self.hooks_enabled = not self.hooks_enabled
+        self.render_state()
+        self.notify(_("Hooks enabled") if self.hooks_enabled else _("Hooks disabled"))
+
     def hook(self, which: str, event: str) -> None:
         """which: start|end; event: start|resume (start) or end|pause|quit|switch|reset (end)."""
+        if not self.hooks_enabled:
+            return
         run_hook(self.hooks.get(which, ""), {
             "POMO_EVENT": event, "POMO_PROFILE": self.profile or "",
             "POMO_DONE": str(self.done_pomodoros), "POMO_CYCLES": str(self.cycles),
@@ -750,6 +764,7 @@ class Pomo(App):
                  ("r", "reset", _("Reset"))]
         app = [("p", "profiles", _("Profiles")),
                ("m", "mode", _("Pomodoro") if stopwatch else _("Stopwatch")),
+               ("h", "hooks", _("Disable hooks") if self.hooks_enabled else _("Enable hooks")),
                ("q", "quit", _("Quit"))]
         return [[h for h in row if self.check_action(h[1], ())] for row in (timer, app)]
 
@@ -825,6 +840,7 @@ class Pomo(App):
             (_("Profile: {name}  ·  ", name=self.profile) if self.profile else "")
             + _("Pomodoros: {done}  ·  cycle {n}/{total}", done=self.done_pomodoros,
                 n=self.done_pomodoros % self.cycles + 1, total=self.cycles)
+            + ("" if self.hooks_enabled else _("  ·  hooks off"))
         )
         self.write_state({"mode": POMODORO, "phase": self.phase, "running": self.running,
                           "remaining": secs, "total": total, "done": self.done_pomodoros,
@@ -1067,7 +1083,8 @@ def build_parser() -> argparse.ArgumentParser:
                            default=DEFAULTS["ics_dir"]))
     ap.add_argument("--on-work-end", metavar="CMD",
                     help=_("command run when work ends (\"{default}\")", default=DEFAULTS["on_work_end"]))
-    ap.add_argument("--no-hooks", action="store_true", help=_("do not run any hook"))
+    ap.add_argument("--no-hooks", action="store_true",
+                    help=_("start with the hooks disabled (h toggles them in the app)"))
     ap.add_argument("--stopwatch", action="store_true", help=_("start in stopwatch mode"))
     ap.add_argument("--export-ics", nargs="?", const="pomo-sessions.ics", metavar="FILE",
                     help=_("export the recorded time entries as an iCalendar (.ics) file (default: {file}, - for stdout)",

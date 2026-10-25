@@ -87,7 +87,7 @@ pomo -p deep            # profile "deep"
 pomo -w 40 -s 8 -c 2    # work / short break / cycles (override the profile)
 pomo -L                 # list profiles
 pomo --on-work-start "CMD" --on-work-end "CMD"   # one-off hooks
-pomo --no-hooks         # run no hook at all
+pomo --no-hooks         # start with the hooks disabled (h enables them)
 pomo --lang en          # force the UI language
 pomo --stopwatch        # start in stopwatch mode
 pomo --export-ics       # export logged work sessions to pomo-sessions.ics
@@ -104,6 +104,7 @@ pomo --export-ics       # export logged work sessions to pomo-sessions.ics
 | Timer | `r`       | full reset (back to work, cycle and count at zero) | reset the time and laps |
 | App   | `p`       | switch profile            | —                        |
 | App   | `m`       | switch to the stopwatch   | switch to the pomodoro   |
+| App   | `h`       | disable / enable the hooks | —                       |
 | App   | `q`       | quit                      | quit                     |
 
 The key hints at the bottom of the screen follow the same layout: timer keys on the first line,
@@ -226,6 +227,10 @@ on_work_end = '[ "$POMO_EVENT" = pause ] || echo "end $POMO_PROFILE" >> ~/.local
 | `language`      | `--lang`            | `auto` |
 
 Precedence: defaults < `[hooks]` < profile < CLI options. An empty string `""` disables a hook.
+
+Press `h` in pomodoro mode to disable or re-enable the hooks for the rest of the session (the
+info line shows "hooks off" while they are disabled). Toggling runs nothing by itself: it only
+affects the next start / end events. `--no-hooks` starts with the hooks disabled.
 
 ### Hooks
 
