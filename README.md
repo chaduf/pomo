@@ -2,8 +2,9 @@
 
 Pomodoro TUI (Textual) that runs commands when work periods start and end
 (default: pause/resume whatever media player is playing, through MPRIS), sends desktop
-notifications and shows up in waybar.
-It also has a stopwatch mode with laps.
+notifications and shows up in waybar. It records your work time as named entries, exported as
+iCalendar files (e.g. for Google Calendar), and also has a stopwatch mode with laps.
+Press `?` in the app for the list of keys.
 
 ![Main view](docs/screenshots/main-view.png)
 
@@ -60,8 +61,12 @@ first of kitty, foot, alacritty, wezterm or ghostty (override with `--terminal`)
 is `pomo`, so you can style it in your compositor, e.g. on Hyprland:
 
 ```
-windowrulev2 = float, class:^(pomo)$
-windowrulev2 = size 900 500, class:^(pomo)$
+windowrule {
+  name = pomo
+  float = on
+  size = 900 500
+  match:class = ^(pomo)$
+}
 ```
 
 ### Manual installation
@@ -87,10 +92,10 @@ pomo -p deep            # profile "deep"
 pomo -w 40 -s 8 -c 2    # work / short break / cycles (override the profile)
 pomo -L                 # list profiles
 pomo --on-work-start "CMD" --on-work-end "CMD"   # one-off hooks
-pomo --no-hooks         # start with the hooks disabled (h enables them)
+pomo --no-hooks         # start with the hooks disabled (c enables them)
 pomo --lang en          # force the UI language
 pomo --stopwatch        # start in stopwatch mode
-pomo --export-ics       # export logged work sessions to pomo-sessions.ics
+pomo --export-ics       # export the recorded time entries to pomo-sessions.ics
 ```
 
 ### Keys
@@ -104,13 +109,17 @@ pomo --export-ics       # export logged work sessions to pomo-sessions.ics
 | Timer | `r`       | full reset (back to work, cycle and count at zero) | reset the time and laps |
 | App   | `p`       | switch profile            | —                        |
 | App   | `m`       | switch to the stopwatch   | switch to the pomodoro   |
-| App   | `h`       | disable / enable the hooks | —                       |
+| App   | `c`       | disable / enable the hooks | —                       |
+| App   | `?` `h` `F1` | help: lists the keys of the current mode | same      |
 | App   | `q`       | quit                      | quit                     |
 
-The key hints at the bottom of the screen follow the same layout: timer keys on the first line,
-app keys on the second. They only list the keys available in the current mode and say what each
-key does right now (`space` shows Start, Pause or Resume; `m` shows the mode it switches to).
-Labels are clickable, and on narrow terminals the hints wrap without splitting a key from its label.
+The key hints at the bottom of the screen only show the essentials, on a single line: the main
+timer keys (`space`, `n` or `l`, `r`), then help and quit. Press `?` (or `h`, `F1`) for
+the full list of keys of the current mode. The hints say what each key does right now (`space`
+shows Start, Pause or Resume), labels are clickable, and on narrow terminals the hints wrap
+without splitting a key from its label.
+
+![Help](docs/screenshots/help.png)
 
 Waybar: click = pause/resume, right click = next phase (or lap in stopwatch mode).
 
@@ -228,7 +237,7 @@ on_work_end = '[ "$POMO_EVENT" = pause ] || echo "end $POMO_PROFILE" >> ~/.local
 
 Precedence: defaults < `[hooks]` < profile < CLI options. An empty string `""` disables a hook.
 
-Press `h` in pomodoro mode to disable or re-enable the hooks for the rest of the session (the
+Press `c` in pomodoro mode to disable or re-enable the hooks for the rest of the session (the
 info line shows "hooks off" while they are disabled). Toggling runs nothing by itself: it only
 affects the next start / end events. `--no-hooks` starts with the hooks disabled.
 

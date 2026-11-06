@@ -8,7 +8,7 @@ Config:  ~/.config/pomo/config.toml  (pomo -L to list profiles, pomo -p NAME)
 Hooks:   on_work_start / on_work_end (config) or --on-work-start / --on-work-end (CLI)
 Keys:    space = pause/resume, n = next phase, + / - = add / remove 5 min to the phase
          (- ends the phase when 5 min or less remain), r = reset,
-         p = switch profile, h = enable / disable the hooks,
+         p = switch profile, c = enable / disable the hooks, h / ? / F1 = help,
          m = pomodoro/stopwatch mode, l = lap (stopwatch), q = quit
 Signals: SIGUSR1 = pause/resume, SIGUSR2 = next phase or lap (used by waybar)
 UI language: --lang, $POMO_LANG, `language` in config, then the system locale.
@@ -78,6 +78,28 @@ TRANSLATIONS = {
         "Pomodoro mode": "Mode pomodoro",
         "start in stopwatch mode": "démarrer en mode chronomètre",
         "Quit": "Quitter",
+        "Help": "Aide",
+        "Keys": "Raccourcis",
+        "Timer": "Minuteur",
+        "App": "Application",
+        "start / pause / resume": "démarrer / mettre en pause / reprendre",
+        "next phase (ends the current one)": "phase suivante (termine la phase en cours)",
+        "add {minutes} min to the current phase": "ajouter {minutes} min à la phase en cours",
+        "remove {minutes} min (ends the phase when {minutes} min or less remain)":
+            "retirer {minutes} min (termine la phase s'il reste {minutes} min ou moins)",
+        "full reset: back to work, counters at zero": "réinitialisation complète : retour au travail, compteurs à zéro",
+        "record a lap": "enregistrer un tour",
+        "reset the time and laps": "remettre le temps et les tours à zéro",
+        "switch profile": "changer de profil",
+        "switch to the stopwatch": "passer au chronomètre",
+        "switch to the pomodoro": "passer au pomodoro",
+        "disable the hooks (currently on)": "désactiver les commandes (actuellement actives)",
+        "enable the hooks (currently off)": "activer les commandes (actuellement désactivées)",
+        "this help": "cette aide",
+        "quit": "quitter",
+        "Work time is recorded at the end of each cycle (title asked in a form).":
+            "Le temps de travail est enregistré à la fin de chaque cycle (titre demandé dans un formulaire).",
+        "Esc, q or ?: close": "Échap, q ou ? : fermer",
         "Back to work!": "Au travail !",
         "Session {n}/{total} — {minutes} min": "Session {n}/{total} — {minutes} min",
         "{minutes} min break — {done} pomodoro(s) done": "{minutes} min de pause — {done} pomodoro(s) fait(s)",
@@ -119,13 +141,10 @@ TRANSLATIONS = {
         "command run when work ends (\"{default}\")": "commande à la fin du travail (« {default} »)",
         "start with the hooks disabled (h toggles them in the app)":
             "démarrer avec les commandes désactivées (h les réactive dans l'application)",
-        "Disable hooks": "Désactiver les commandes",
-        "Enable hooks": "Activer les commandes",
         "Hooks disabled": "Commandes désactivées",
         "Hooks enabled": "Commandes activées",
         "  ·  hooks off": "  ·  commandes désactivées",
         "UI language: {langs} (default: auto)": "langue de l'interface : {langs} (défaut : auto)",
-        "Profiles": "Profils",
         "Cycle complete: record your work": "Cycle terminé : enregistre ton travail",
         "Unfinished cycle: record your work": "Cycle inachevé : enregistre ton travail",
         "Unrecorded work from a previous session": "Travail non enregistré d'une session précédente",
@@ -465,7 +484,8 @@ class Pomo(App):
         # add / subtract are the keypad + / -
         for key, action in (("space", "toggle"), ("n", "skip"), ("plus,add", "extend"),
                             ("minus,subtract", "shorten"), ("l", "lap"), ("r", "reset"),
-                            ("p", "profiles"), ("m", "mode"), ("h", "hooks"), ("q", "quit")):
+                            ("p", "profiles"), ("m", "mode"), ("c", "hooks"),
+                            ("h,question_mark,f1", "help"), ("q", "quit")):
             self.bind(key, action, show=False)  # labels are rendered by render_hints()
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGUSR1, self.action_toggle)
@@ -734,6 +754,28 @@ class Pomo(App):
         refresh_waybar()
         self.exit()
 
+    def action_help(self) -> None:
+        if not isinstance(self.screen, (HelpScreen, EntryForm)):
+            self.push_screen(HelpScreen(self.help_sections()))
+
+    def help_sections(self) -> list[tuple[str, list[tuple[str, str]]]]:
+        """Keys of the current mode, as (section title, [(keys, description)])."""
+        if self.mode == STOPWATCH:
+            timer = [("space", _("start / pause / resume")), ("l", _("record a lap")),
+                     ("r", _("reset the time and laps"))]
+            app = [("m", _("switch to the pomodoro"))]
+        else:
+            timer = [("space", _("start / pause / resume")), ("n", _("next phase (ends the current one)")),
+                     ("+", _("add {minutes} min to the current phase", minutes=EXTEND_MINUTES)),
+                     ("-", _("remove {minutes} min (ends the phase when {minutes} min or less remain)",
+                             minutes=EXTEND_MINUTES)),
+                     ("r", _("full reset: back to work, counters at zero"))]
+            app = [("p", _("switch profile")), ("m", _("switch to the stopwatch")),
+                   ("c", _("disable the hooks (currently on)") if self.hooks_enabled
+                    else _("enable the hooks (currently off)"))]
+        app += [("? h F1", _("this help")), ("q", _("quit"))]
+        return [(_("Timer"), timer), (_("App"), app)]
+
     def action_hooks(self) -> None:
         """Enable / disable the work start / end hooks; takes effect from the next event."""
         self.hooks_enabled = not self.hooks_enabled
@@ -752,21 +794,16 @@ class Pomo(App):
 
     # ---- display -------------------------------------------------------
     def hint_rows(self) -> list[list[tuple[str, str, str]]]:
-        """Key hints as (key, action, label), grouped by role: the timer first, then the app.
-        Labels say what the key will do now (Start / Pause / Resume, the mode to switch to)."""
+        """Key hints as (key, action, label) on a single line: the essential timer keys, then
+        help and quit (every other key is listed in the help). Labels say what the key will do now."""
         stopwatch = self.mode == STOPWATCH
         idle = not self.running and (self.elapsed == 0 if stopwatch else not self.started)
         toggle = _("Start") if idle else _("Pause") if self.running else _("Resume")
         timer = [("space", "toggle", toggle),
                  ("l", "lap", _("Lap")) if stopwatch else ("n", "skip", _("Next phase")),
-                 ("+", "extend", f"{EXTEND_MINUTES} min"),
-                 ("-", "shorten", f"{EXTEND_MINUTES} min"),
                  ("r", "reset", _("Reset"))]
-        app = [("p", "profiles", _("Profiles")),
-               ("m", "mode", _("Pomodoro") if stopwatch else _("Stopwatch")),
-               ("h", "hooks", _("Disable hooks") if self.hooks_enabled else _("Enable hooks")),
-               ("q", "quit", _("Quit"))]
-        return [[h for h in row if self.check_action(h[1], ())] for row in (timer, app)]
+        app = [("?", "help", _("Help")), ("q", "quit", _("Quit"))]
+        return [[h for h in timer + app if self.check_action(h[1], ())]]
 
     def render_hints(self) -> None:
         """Render the hint rows, wrapping whole "key label" items to the terminal width."""
@@ -859,6 +896,40 @@ class Pomo(App):
             if old is None or old[0] != key:
                 refresh_waybar()
             self._last_state = (key, tick)
+
+
+class HelpScreen(ModalScreen[None]):
+    """Lists the keys of the current mode; closed with Esc, q or the help keys."""
+
+    CSS = """
+    HelpScreen { align: center middle; }
+    #help { width: 84; max-width: 95%; height: auto; max-height: 100%; overflow-y: auto;
+            padding: 0 2; border: round $accent; background: $surface; }
+    #help-title { text-style: bold; margin: 1 0; }
+    .help-section { text-style: bold; color: $text-muted; }
+    .help-keys { margin-bottom: 1; }
+    #help-note, #help-close { color: $text-muted; width: 100%; }
+    #help-close { margin-bottom: 1; }
+    """
+    BINDINGS = [Binding("escape,q,question_mark,h,f1", "dismiss(None)", show=False)]
+
+    def __init__(self, sections: list[tuple[str, list[tuple[str, str]]]]) -> None:
+        super().__init__()
+        self.sections = sections
+
+    def compose(self) -> ComposeResult:
+        width = max(len(keys) for _title, rows in self.sections for keys, _desc in rows) + 3
+        with Vertical(id="help"):
+            yield Label(_("Keys"), id="help-title")
+            for title, rows in self.sections:
+                yield Label(title, classes="help-section")
+                text = Text()
+                for i, (keys, desc) in enumerate(rows):
+                    text.append(("\n" if i else "") + keys.ljust(width), style="bold")
+                    text.append(desc)
+                yield Static(text, classes="help-keys")
+            yield Label(_("Work time is recorded at the end of each cycle (title asked in a form)."), id="help-note")
+            yield Label(_("Esc, q or ?: close"), id="help-close")
 
 
 class ProfileList(OptionList):
