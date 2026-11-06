@@ -7,7 +7,8 @@ exposes its state to waybar. Also has a stopwatch mode with laps.
 Config:  ~/.config/pomo/config.toml  (pomo -L to list profiles, pomo -p NAME)
 Hooks:   on_work_start / on_work_end (config) or --on-work-start / --on-work-end (CLI)
 Keys:    space = pause/resume, n = next phase, + / - = add / remove 5 min to the phase
-         (- ends the phase when 5 min or less remain), r = reset,
+         (- ends the phase when 5 min or less remain), > / < = add / remove a work session
+         to the cycle, r = reset,
          p = switch profile, c = enable / disable the hooks, h / ? / F1 = help,
          m = pomodoro/stopwatch mode, l = lap (stopwatch), q = quit
 Signals: SIGUSR1 = pause/resume, SIGUSR2 = next phase or lap (used by waybar)
@@ -64,6 +65,13 @@ TRANSLATIONS = {
         "Next phase": "Phase suivante",
         "{phase}: +{minutes} min": "{phase} : +{minutes} min",
         "{phase}: -{minutes} min": "{phase} : -{minutes} min",
+        "Cycle: {n} work session(s) before the long break": "Cycle : {n} session(s) de travail avant la pause longue",
+        "Cannot remove: this cycle needs at least {n} work session(s)":
+            "Impossible de retirer : ce cycle compte au moins {n} session(s) de travail",
+        "add a work session to the cycle (the long break comes later)":
+            "ajouter une session de travail au cycle (la pause longue arrive plus tard)",
+        "remove a work session from the cycle (never below the current one)":
+            "retirer une session de travail du cycle (jamais sous la session en cours)",
         "Reset": "Réinitialiser",
         "Start": "Démarrer",
         "Pause": "Pause",
@@ -451,6 +459,7 @@ class Pomo(App):
         self.profile = profile
         self.phase = WORK
         self.done_pomodoros = 0
+        self.cycle_done = 0  # work sessions done in the current cycle (> / < change self.cycles)
         self.remaining = float(self.durations[WORK])
         self.phase_total = self.durations[WORK]  # length of the current phase, + extends it
         self.running = False
@@ -483,7 +492,8 @@ class Pomo(App):
         self.main_screen = self.screen  # the profile menu is pushed on top of it
         # add / subtract are the keypad + / -
         for key, action in (("space", "toggle"), ("n", "skip"), ("plus,add", "extend"),
-                            ("minus,subtract", "shorten"), ("l", "lap"), ("r", "reset"),
+                            ("minus,subtract", "shorten"),
+                            ("greater_than_sign", "add_cycle"), ("less_than_sign", "remove_cycle"), ("l", "lap"), ("r", "reset"),
                             ("p", "profiles"), ("m", "mode"), ("c", "hooks"),
                             ("h,question_mark,f1", "help"), ("q", "quit")):
             self.bind(key, action, show=False)  # labels are rendered by render_hints()
@@ -501,7 +511,7 @@ class Pomo(App):
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Hide the bindings that do not apply to the current mode."""
-        if action in ("skip", "extend", "shorten", "profiles", "hooks"):
+        if action in ("skip", "extend", "shorten", "add_cycle", "remove_cycle", "profiles", "hooks"):
             return self.mode == POMODORO
         if action == "lap":
             return self.mode == STOPWATCH
@@ -524,7 +534,7 @@ class Pomo(App):
         if announce:
             if phase == WORK:
                 notify(f"{ICONS[WORK]} {_('Back to work!')}",
-                       _("Session {n}/{total} — {minutes} min", n=self.done_pomodoros % self.cycles + 1,
+                       _("Session {n}/{total} — {minutes} min", n=self.cycle_done + 1,
                          total=self.cycles, minutes=self.durations[WORK] // 60),
                        "appointment-soon", "critical")
             else:
@@ -537,7 +547,7 @@ class Pomo(App):
     # ---- time entries --------------------------------------------------
     def open_segment(self) -> None:
         if self.mode == POMODORO and self.phase == WORK and self.running and self.segment is None:
-            self.segment = {"work": self.done_pomodoros % self.cycles + 1, "start": time.time()}
+            self.segment = {"work": self.cycle_done + 1, "start": time.time()}
             self.save_snapshot()
 
     def close_segment(self) -> None:
@@ -604,7 +614,10 @@ class Pomo(App):
         if self.phase == WORK:
             self.close_segment()  # n during work cuts the entry short
             self.done_pomodoros += 1
-            nxt = LONG if self.done_pomodoros % self.cycles == 0 else SHORT
+            self.cycle_done += 1
+            nxt = LONG if self.cycle_done >= self.cycles else SHORT
+            if nxt == LONG:
+                self.cycle_done = 0  # the long break opens the next cycle
             if nxt == LONG:
                 self.start_phase(nxt)
                 self.finish_cycle("complete")
@@ -666,6 +679,25 @@ class Pomo(App):
         self.phase_total -= EXTEND_MINUTES * 60
         self.render_state()
         self.notify(_("{phase}: -{minutes} min", phase=phase_label(self.phase), minutes=EXTEND_MINUTES))
+
+    def action_add_cycle(self) -> None:
+        if self.mode == POMODORO:
+            self.cycles += 1
+            self.render_state()
+            self.notify(_("Cycle: {n} work session(s) before the long break", n=self.cycles))
+
+    def action_remove_cycle(self) -> None:
+        """Remove a work session from the cycle, never below the current (or next) one."""
+        if self.mode != POMODORO:
+            return
+        minimum = self.cycle_done + 1
+        if self.cycles <= minimum:
+            self.notify(_("Cannot remove: this cycle needs at least {n} work session(s)", n=minimum),
+                        severity="warning")
+            return
+        self.cycles -= 1
+        self.render_state()
+        self.notify(_("Cycle: {n} work session(s) before the long break", n=self.cycles))
 
     def action_lap(self) -> None:
         if self.mode == STOPWATCH and self.running:
@@ -769,6 +801,8 @@ class Pomo(App):
                      ("+", _("add {minutes} min to the current phase", minutes=EXTEND_MINUTES)),
                      ("-", _("remove {minutes} min (ends the phase when {minutes} min or less remain)",
                              minutes=EXTEND_MINUTES)),
+                     (">", _("add a work session to the cycle (the long break comes later)")),
+                     ("<", _("remove a work session from the cycle (never below the current one)")),
                      ("r", _("full reset: back to work, counters at zero"))]
             app = [("p", _("switch profile")), ("m", _("switch to the stopwatch")),
                    ("c", _("disable the hooks (currently on)") if self.hooks_enabled
@@ -876,7 +910,7 @@ class Pomo(App):
         screen.query_one("#info", Label).update(
             (_("Profile: {name}  ·  ", name=self.profile) if self.profile else "")
             + _("Pomodoros: {done}  ·  cycle {n}/{total}", done=self.done_pomodoros,
-                n=self.done_pomodoros % self.cycles + 1, total=self.cycles)
+                n=self.cycle_done + 1, total=self.cycles)
             + ("" if self.hooks_enabled else _("  ·  hooks off"))
         )
         self.write_state({"mode": POMODORO, "phase": self.phase, "running": self.running,

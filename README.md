@@ -106,6 +106,8 @@ pomo --export-ics       # export the recorded time entries to pomo-sessions.ics
 | Timer | `n` / `l` | `n`: next phase           | `l`: record a lap        |
 | Timer | `+`       | extend the current phase (work or break) by 5 min | — |
 | Timer | `-`       | shorten the current phase by 5 min; with 5 min or less left, end it (like `n`) | — |
+| Timer | `>`       | add a work session to the current cycle (the long break comes later) | — |
+| Timer | `<`       | remove a work session from the cycle, never below the current one | — |
 | Timer | `r`       | full reset (back to work, cycle and count at zero) | reset the time and laps |
 | App   | `p`       | switch profile            | —                        |
 | App   | `m`       | switch to the stopwatch   | switch to the pomodoro   |
@@ -234,6 +236,9 @@ on_work_end = '[ "$POMO_EVENT" = pause ] || echo "end $POMO_PROFILE" >> ~/.local
 | `on_work_end`   | `--on-work-end`     | `pomo-media pause`  |
 | `ics_dir`       | `--ics-dir`         | `~/.local/share/pomo/ics` |
 | `language`      | `--lang`            | `auto` |
+
+`>` / `<` change the number of work sessions of the cycle for the current session only: `r` or a
+profile switch goes back to the profile's `cycles`.
 
 Precedence: defaults < `[hooks]` < profile < CLI options. An empty string `""` disables a hook.
 
