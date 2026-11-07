@@ -1,20 +1,20 @@
-"""Test helpers: load bin/pomo as a module in an isolated environment and drive its TUI.
+"""Test helpers: load the pomo package in an isolated environment and drive its TUI.
 
 The tests only look at what pomo shows or does (widgets, notifications, hooks run, waybar
 state file, recorded entries), never at its internal attributes, so they keep working when
 the code behind them is reorganised.
 """
 import contextlib
-import importlib.machinery
-import importlib.util
+import importlib
 import json
 import os
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-POMO = ROOT / "bin" / "pomo"
 XDG_VARS = ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR")
 
 
@@ -36,17 +36,31 @@ class FakeClock:
         self.mono += seconds
 
 
-def load_pomo(base: Path):
-    """Import bin/pomo with its config, data and runtime directories inside `base`."""
+def load_pomo(base: Path) -> types.SimpleNamespace:
+    """Import a fresh copy of the pomo package with its config, data and runtime directories
+    inside `base` (the paths are read from the environment at import time).
+
+    Returns the package modules (`.app`, `.system`...) and, for convenience, the names the
+    tests use (`.Pomo`, `.DEFAULTS`, `.STATE_FILE`...)."""
     for var in XDG_VARS:
         path = base / var.lower()
         path.mkdir()
         os.environ[var] = str(path)
-    loader = importlib.machinery.SourceFileLoader("pomo_under_test", str(POMO))
-    spec = importlib.util.spec_from_loader("pomo_under_test", loader)
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
-    return module
+    for name in [m for m in sys.modules if m == "pomo" or m.startswith("pomo.")]:
+        del sys.modules[name]
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    mods = {name: importlib.import_module(f"pomo.{name}")
+            for name in ("i18n", "system", "config", "entries", "modes", "app", "main")}
+    m = types.SimpleNamespace(**mods)
+    m.Pomo = m.app.Pomo
+    m.DEFAULTS, m.CONFIG_FILE = m.config.DEFAULTS, m.config.CONFIG_FILE
+    m.STATE_FILE = m.system.STATE_FILE
+    m.DATA_DIR, m.SESSIONS_FILE = m.entries.DATA_DIR, m.entries.SESSIONS_FILE
+    for name in ("POMODORO", "STOPWATCH", "StopwatchMode", "PomodoroMode", "PomodoroEvents"):
+        setattr(m, name, getattr(m.modes, name))
+    m.i18n.lang = "en"
+    return m
 
 
 class ModeTestCase(unittest.TestCase):
@@ -57,7 +71,6 @@ class ModeTestCase(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.saved_env = {var: os.environ.get(var) for var in XDG_VARS}
         self.pomo = load_pomo(Path(self.tmp.name))
-        self.pomo.lang = "en"
         self.clock = FakeClock()
 
     def tearDown(self) -> None:
@@ -80,14 +93,14 @@ class PomoTestCase(unittest.IsolatedAsyncioTestCase):
         self.base = Path(self.tmp.name)
         self.saved_env = {var: os.environ.get(var) for var in XDG_VARS}
         self.pomo = load_pomo(self.base)
-        self.pomo.lang = "en"
         self.clock = FakeClock()
-        self.pomo.time = self.clock
+        system = self.pomo.system  # every clock read and system call goes through it
+        system.time = self.clock
         self.hooks_run: list[tuple[str, dict]] = []  # (command, environment)
         self.desktop_notifications: list[str] = []   # titles sent to notify-send
-        self.pomo.run_hook = lambda cmd, env: self.hooks_run.append((cmd, env))
-        self.pomo.notify = lambda title, body, *a, **k: self.desktop_notifications.append(title)
-        self.pomo.refresh_waybar = lambda: None
+        system.run_hook = lambda cmd, env: self.hooks_run.append((cmd, env))
+        system.notify = lambda title, body, *a, **k: self.desktop_notifications.append(title)
+        system.refresh_waybar = lambda: None
         self.ics_dir = self.base / "ics"
 
     async def asyncTearDown(self) -> None:

@@ -15,6 +15,7 @@ set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
+LIB_DIR="$HOME/.local/lib/pomo"  # the pomo Python package (bin/pomo is a small launcher)
 CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
 POMO_CONF="$CONF_DIR/pomo"
 WAYBAR="$CONF_DIR/waybar"
@@ -92,6 +93,7 @@ reload_waybar() {
 
 # ---------------------------------------------------------------- uninstall
 if ((UNINSTALL)); then
+  rm -rfv "$LIB_DIR"
   rm -fv "$DESKTOP_FILE" "$ICON_FILE" "$BIN_DIR/pomo" "$BIN_DIR/pomo-media" "$WAYBAR/scripts/pomo.py" "$WAYBAR/modules/custom-pomo.jsonc"
   if [[ -f "$WAYBAR/style.css" ]] && grep -q '/\* ---- pomo (pomodoro) ---- \*/' "$WAYBAR/style.css"; then
     cp "$WAYBAR/style.css" "$WAYBAR/style.css.bak-pomo"
@@ -126,6 +128,15 @@ fi
 echo "== Files ($MODE)"
 install_file "$SRC/bin/pomo" "$BIN_DIR/pomo" 755
 install_file "$SRC/bin/pomo-media" "$BIN_DIR/pomo-media" 755
+# the package: copied next to the launcher's lookup path; with --link the launcher resolves
+# to the repository and uses its package directly, so no copy is kept
+rm -rf "$LIB_DIR"
+if [[ "$MODE" == copy ]]; then
+  mkdir -p "$LIB_DIR"
+  cp -r "$SRC/pomo" "$LIB_DIR/pomo"
+  rm -rf "$LIB_DIR/pomo/__pycache__"
+  ok "$LIB_DIR/pomo"
+fi
 if [[ -e "$POMO_CONF/config.toml" ]] && ((!FORCE)); then
   ok "$POMO_CONF/config.toml already exists, kept"
   grep -qE '^\s*(\[profils|defaut\s*=|\[commandes)' "$POMO_CONF/config.toml" \

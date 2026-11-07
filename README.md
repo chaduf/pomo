@@ -73,7 +73,8 @@ windowrule {
 
 | Project file                         | Destination                                      |
 |--------------------------------------|--------------------------------------------------|
-| `bin/pomo`                           | `~/.local/bin/pomo`                              |
+| `bin/pomo` (launcher)                | `~/.local/bin/pomo`                              |
+| `pomo/` (the Python package)         | `~/.local/lib/pomo/pomo/`                        |
 | `bin/pomo-media`                     | `~/.local/bin/pomo-media`                        |
 | `config/pomo/config.toml`            | `~/.config/pomo/config.toml`                     |
 | `waybar/scripts/pomo.py`             | `~/.config/waybar/scripts/pomo.py`               |
@@ -279,8 +280,34 @@ User-facing text (TUI, notifications, waybar tooltip, CLI help) is in English by
 The language is resolved from `--lang`, then `$POMO_LANG`, then `language` in the config,
 then the system locale (`LC_ALL`, `LC_MESSAGES`, `LANG`). Available: `en`, `fr`.
 
-To add a language, add an entry to `TRANSLATIONS` in `bin/pomo` and `waybar/scripts/pomo.py`
+To add a language, add an entry to `TRANSLATIONS` in `pomo/i18n.py` and `waybar/scripts/pomo.py`
 (English strings are the keys).
+
+## Development
+
+`bin/pomo` is a small launcher: it finds the `pomo` package (next to it in the repository, or
+in `~/.local/lib/pomo`) and calls `pomo.main`. From the repository, run `bin/pomo` directly; with
+`./install.sh --link` the installed launcher uses the repository's package, so edits take effect
+immediately.
+
+| Module          | Role |
+|-----------------|------|
+| `pomo/main.py`    | command line options, entry point |
+| `pomo/app.py`     | the Textual app (screen, keys, help, profile menu, time entries form); it delegates to the current mode |
+| `pomo/modes.py`   | timer logic without Textual: `TimerMode` interface, `PomodoroMode`, `StopwatchMode` |
+| `pomo/entries.py` | work time entries: naming, log, crash recovery, `.ics` files and export |
+| `pomo/config.py`  | defaults, reading and validating `config.toml`, profiles |
+| `pomo/system.py`  | clocks, hooks, desktop notifications, waybar signal and state file |
+| `pomo/i18n.py`    | translations and choice of the language |
+
+Tests use the standard library only (no pytest needed):
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+`tests/test_modes.py` tests the modes directly; the other files drive the real TUI with a fake
+clock and only check what pomo shows or does, so they survive refactorings.
 
 ## License
 
